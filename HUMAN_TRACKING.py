@@ -99,14 +99,14 @@ st.markdown("""
 
 st.title("📍 Human Tracking Dashboard")
 
-# -------- Global Variables --------
-latest_data = st.session_state.get("latest_data", {"x": 0, "y": 0, "speed": 0, "distance": 0})
+# -------- Default Values --------
+default_data = {"x": 0, "y": 0, "speed": 0, "distance": 0}
 
 # -------- MQTT Callbacks --------
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         st.session_state["connected"] = True
-        client.subscribe("esp32/target")  # ✅ updated topic
+        client.subscribe("esp32/tracking")
     else:
         st.session_state["connected"] = False
 
@@ -114,8 +114,7 @@ def on_message(client, userdata, msg):
     try:
         payload = msg.payload.decode("utf-8")
         data = json.loads(payload)
-
-        if all(k in data for k in ("x", "y", "speed", "distance")):
+        if all(k in data for k in default_data):
             st.session_state["latest_data"] = data
     except Exception as e:
         print(f"[!] MQTT message error: {e}")
@@ -123,7 +122,7 @@ def on_message(client, userdata, msg):
 # -------- MQTT Setup --------
 if "mqtt_initialized" not in st.session_state:
     st.session_state["connected"] = False
-    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
+    st.session_state["latest_data"] = default_data.copy()
     st.session_state["mqtt_initialized"] = True
 
     client = mqtt.Client()
@@ -137,10 +136,13 @@ if "mqtt_initialized" not in st.session_state:
 # -------- Auto Refresh --------
 st_autorefresh(interval=1000, key="data_refresh")
 
-# -------- UI Display --------
-data = st.session_state["latest_data"]
-st.markdown("### 📡 Live Tracking Data")
+# -------- Retrieve & Validate Latest Data --------
+data = st.session_state.get("latest_data", default_data)
+if not all(k in data for k in default_data):
+    data = default_data.copy()
 
+# -------- UI Display --------
+st.markdown("### 📡 Live Tracking Data")
 col1, col2 = st.columns(2)
 with col1:
     st.metric("🧭 X Coordinate", f"{data['x']}")
@@ -149,7 +151,7 @@ with col2:
     st.metric("🧭 Y Coordinate", f"{data['y']}")
     st.metric("📏 Distance", f"{data['distance']} m")
 
-# -------- Simple Plot --------
+# -------- Real-Time Plot --------
 fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=[0, data["x"]],
