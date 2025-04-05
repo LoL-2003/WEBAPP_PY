@@ -100,13 +100,13 @@ st.markdown("""
 st.title("📍 Human Tracking Dashboard")
 
 # -------- Global Variables --------
-latest_data = st.session_state.get("latest_data", {"X": 0, "Y": 0, "Speed": 0, "Distance": 0})
+latest_data = st.session_state.get("latest_data", {"x": 0, "y": 0, "speed": 0, "distance": 0})
 
 # -------- MQTT Callbacks --------
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         st.session_state["connected"] = True
-        client.subscribe("esp32/tracking")
+        client.subscribe("esp32/target")  # ✅ updated topic
     else:
         st.session_state["connected"] = False
 
@@ -115,7 +115,7 @@ def on_message(client, userdata, msg):
         payload = msg.payload.decode("utf-8")
         data = json.loads(payload)
 
-        if all(k in data for k in ("X", "Y", "Speed", "Distance")):
+        if all(k in data for k in ("x", "y", "speed", "distance")):
             st.session_state["latest_data"] = data
     except Exception as e:
         print(f"[!] MQTT message error: {e}")
@@ -123,7 +123,7 @@ def on_message(client, userdata, msg):
 # -------- MQTT Setup --------
 if "mqtt_initialized" not in st.session_state:
     st.session_state["connected"] = False
-    st.session_state["latest_data"] = {"X": 0, "Y": 0, "Speed": 0, "Distance": 0}
+    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
     st.session_state["mqtt_initialized"] = True
 
     client = mqtt.Client()
@@ -143,17 +143,17 @@ st.markdown("### 📡 Live Tracking Data")
 
 col1, col2 = st.columns(2)
 with col1:
-    st.metric("🧭 X Coordinate", f"{data['X']}")
-    st.metric("🏃 Speed", f"{data['Speed']} m/s")
+    st.metric("🧭 X Coordinate", f"{data['x']}")
+    st.metric("🏃 Speed", f"{data['speed']} m/s")
 with col2:
-    st.metric("🧭 Y Coordinate", f"{data['Y']}")
-    st.metric("📏 Distance", f"{data['Distance']} m")
+    st.metric("🧭 Y Coordinate", f"{data['y']}")
+    st.metric("📏 Distance", f"{data['distance']} m")
 
 # -------- Simple Plot --------
 fig = go.Figure()
 fig.add_trace(go.Scatter(
-    x=[0, data["X"]],
-    y=[0, data["Y"]],
+    x=[0, data["x"]],
+    y=[0, data["y"]],
     mode='lines+markers',
     marker=dict(color="lightgreen", size=10),
     line=dict(color="cyan", width=2)
