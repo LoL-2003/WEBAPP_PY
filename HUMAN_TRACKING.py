@@ -89,7 +89,7 @@ CONTROL_TOPIC = "esp32/control"
 STATUS_TOPIC = "esp32/status"
 SENSOR_TOPIC = "esp32/target"
 
-# Session state initialization
+# Session state
 if "mqtt_started" not in st.session_state:
     st.session_state.mqtt_started = False
 if "status" not in st.session_state:
@@ -98,27 +98,27 @@ if "data" not in st.session_state:
     st.session_state.data = {"x": [], "y": [], "speed": [], "distance": []}
 
 # Streamlit UI
-st.set_page_config(page_title="Human Tracking Dashboard", layout="wide")
+st.set_page_config(page_title="Human Tracking", layout="wide")
 st.title("📡 Real-Time Human Tracking Dashboard")
-
 st.markdown(f"### Status: {st.session_state.status}")
 led_col1, led_col2 = st.columns(2)
 
-# MQTT callbacks
+# MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         client.subscribe(STATUS_TOPIC)
         client.subscribe(SENSOR_TOPIC)
         client.publish(STATUS_TOPIC, "ONLINE")
     else:
-        st.session_state.status = f"❌ MQTT Connection Failed: {rc}"
+        st.session_state.status = f"❌ MQTT Connect Failed: {rc}"
 
 def on_message(client, userdata, msg):
     topic = msg.topic
     payload = msg.payload.decode()
 
     if topic == STATUS_TOPIC:
-        st.session_state.status = "🟢 Online" if "ONLINE" in payload else "🔴 Offline"
+        if "ONLINE" in payload:
+            st.session_state.status = "🟢 Online"
 
     elif topic == SENSOR_TOPIC:
         try:
@@ -126,13 +126,12 @@ def on_message(client, userdata, msg):
             for key in ["x", "y", "speed", "distance"]:
                 if key in data:
                     st.session_state.data[key].append(data[key])
-                    # Limit history to last 100 points
                     if len(st.session_state.data[key]) > 100:
                         st.session_state.data[key] = st.session_state.data[key][-100:]
-        except json.JSONDecodeError:
-            pass
+        except Exception as e:
+            print("Parse Error:", e)
 
-# Start MQTT Client Thread
+# MQTT Thread Start
 def start_mqtt():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
@@ -146,7 +145,7 @@ if not st.session_state.mqtt_started:
     threading.Thread(target=start_mqtt, daemon=True).start()
     st.session_state.mqtt_started = True
 
-# LED Control Buttons
+# LED Controls
 if led_col1.button("🔆 Turn ON"):
     pub = mqtt.Client()
     pub.username_pw_set(USERNAME, PASSWORD)
@@ -163,23 +162,20 @@ if led_col2.button("🌙 Turn OFF"):
     pub.publish(CONTROL_TOPIC, "OFF")
     st.success("Sent: OFF")
 
-# Live Plotting
-st.markdown("---")
-st.subheader("📊 Real-Time Sensor Graphs")
+# Combined Graph
+st.subheader("📊 Distance, Speed and Position Graph")
 
-col1, col2 = st.columns(2)
-with col1:
-    fig_xy = go.Figure()
-    fig_xy.add_trace(go.Scatter(y=st.session_state.data["x"], mode="lines+markers", name="X"))
-    fig_xy.add_trace(go.Scatter(y=st.session_state.data["y"], mode="lines+markers", name="Y"))
-    fig_xy.update_layout(title="X vs Y", xaxis_title="Time", yaxis_title="Position")
-    st.plotly_chart(fig_xy, use_container_width=True)
+fig = go.Figure()
+fig.add_trace(go.Scatter(y=st.session_state.data["x"], mode='lines', name='X Position'))
+fig.add_trace(go.Scatter(y=st.session_state.data["y"], mode='lines', name='Y Position'))
+fig.add_trace(go.Scatter(y=st.session_state.data["speed"], mode='lines', name='Speed'))
+fig.add_trace(go.Scatter(y=st.session_state.data["distance"], mode='lines', name='Distance'))
 
-with col2:
-    fig_speed_dist = go.Figure()
-    fig_speed_dist.add_trace(go.Scatter(y=st.session_state.data["speed"], mode="lines+markers", name="Speed"))
-    fig_speed_dist.add_trace(go.Scatter(y=st.session_state.data["distance"], mode="lines+markers", name="Distance"))
-    fig_speed_dist.update_layout(title="Speed & Distance", xaxis_title="Time", yaxis_title="Value")
-    st.plotly_chart(fig_speed_dist, use_container_width=True)
+fig.update_layout(title="Human Movement Tracking",
+                  xaxis_title="Time (samples)",
+                  yaxis_title="Value",
+                  legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 
-st.markdown("Developed by **Aditya Puri** 🚀")
+st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("👨‍💻 Developed by **Aditya Puri**")
