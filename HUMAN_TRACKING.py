@@ -79,12 +79,34 @@ import threading
 import queue
 import json
 import plotly.graph_objs as go
+import time
 
-# Set dark theme
-st.set_page_config(page_title="Human Tracking", layout="centered")
+# Page config
+st.set_page_config(page_title="ESP32 Human Tracking", layout="centered", initial_sidebar_state="collapsed")
 
-# Queue to receive MQTT data
+# Dark mode style
+st.markdown("""
+    <style>
+        body { background-color: #121212; color: white; }
+        .stMetric label, .stMetric div { color: #00ffb7; }
+        h1 { color: #00ffb7 !important; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h1 style='text-align:center;'>ESP32 Human Tracking Dashboard</h1>", unsafe_allow_html=True)
+st.markdown("---")
+
+# Queue for MQTT messages
 mqtt_queue = queue.Queue()
+
+# Initialize session state
+if 'plot_x' not in st.session_state:
+    st.session_state.plot_x = []
+    st.session_state.plot_y = []
+    st.session_state.x = 0
+    st.session_state.y = 0
+    st.session_state.speed = 0
+    st.session_state.distance = 0
 
 # MQTT config
 MQTT_BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
@@ -93,16 +115,13 @@ MQTT_TOPIC = "esp32/sensor"
 MQTT_USERNAME = "HUMAN_TRACKING"
 MQTT_PASSWORD = "12345678aA"
 
-# Global variable to store last values
-data_state = {"x": 0, "y": 0, "speed": 0, "distance": 0}
-
-# MQTT callback
+# MQTT callbacks
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("✅ MQTT connected.")
         client.subscribe(MQTT_TOPIC)
     else:
-        print(f"❌ MQTT connection failed with code {rc}")
+        print(f"❌ MQTT connection failed: {rc}")
 
 def on_message(client, userdata, msg):
     try:
@@ -110,66 +129,60 @@ def on_message(client, userdata, msg):
         data = json.loads(payload)
         mqtt_queue.put(data)
     except Exception as e:
-        print("Error parsing MQTT message:", e)
+        print("MQTT parsing error:", e)
 
-# MQTT thread setup
+# MQTT background thread
 def mqtt_thread():
     client = mqtt.Client()
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.tls_set()  # Use SSL
+    client.tls_set()
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT)
     client.loop_forever()
 
-# Start MQTT in background
-threading.Thread(target=mqtt_thread, daemon=True).start()
+# Start thread once
+if 'mqtt_started' not in st.session_state:
+    threading.Thread(target=mqtt_thread, daemon=True).start()
+    st.session_state.mqtt_started = True
 
-# Streamlit UI
-st.markdown("<h1 style='color:#00ffb7; text-align:center;'>ESP32 Human Tracking Dashboard</h1>", unsafe_allow_html=True)
-st.markdown("---")
+# Process MQTT messages (if any)
+if not mqtt_queue.empty():
+    data = mqtt_queue.get()
+    st.session_state.x = data.get("x", 0)
+    st.session_state.y = data.get("y", 0)
+    st.session_state.speed = data.get("speed", 0)
+    st.session_state.distance = data.get("distance", 0)
+    st.session_state.plot_x.append(st.session_state.x)
+    st.session_state.plot_y.append(st.session_state.y)
 
-x_val = st.empty()
-y_val = st.empty()
-speed_val = st.empty()
-distance_val = st.empty()
-plot_area = st.empty()
+# Show metrics
+col1, col2 = st.columns(2)
+col3, col4 = st.columns(2)
 
-st.markdown("<style>body { background-color: #121212; color: white; }</style>", unsafe_allow_html=True)
+col1.metric("X Coordinate", st.session_state.x)
+col2.metric("Y Coordinate", st.session_state.y)
+col3.metric("Speed", f"{st.session_state.speed:.2f}")
+col4.metric("Distance", f"{st.session_state.distance:.2f}")
 
-# Real-time update loop
-plot_x, plot_y = [], []
+# Live plot
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=st.session_state.plot_x,
+    y=st.session_state.plot_y,
+    mode="lines+markers",
+    line=dict(color="#00ffb7")
+))
+fig.update_layout(
+    title="Live Target Path",
+    plot_bgcolor="#1e1e1e",
+    paper_bgcolor="#121212",
+    font_color="#ffffff",
+    xaxis_title="X",
+    yaxis_title="Y",
+)
+st.plotly_chart(fig, use_container_width=True)
 
-while True:
-    if not mqtt_queue.empty():
-        data = mqtt_queue.get()
-        x = data.get("x", 0)
-        y = data.get("y", 0)
-        speed = data.get("speed", 0)
-        distance = data.get("distance", 0)
-
-        # Update UI
-        x_val.metric("X Coordinate", x)
-        y_val.metric("Y Coordinate", y)
-        speed_val.metric("Speed", f"{speed:.2f}")
-        distance_val.metric("Distance", f"{distance:.2f}")
-
-        # Update data
-        plot_x.append(x)
-        plot_y.append(y)
-
-        # Live plot
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=plot_x, y=plot_y, mode="lines+markers", line=dict(color="#00ffb7")))
-        fig.update_layout(
-            plot_bgcolor="#1e1e1e",
-            paper_bgcolor="#121212",
-            font_color="#ffffff",
-            title="Live X-Y Movement",
-            xaxis_title="X Position",
-            yaxis_title="Y Position",
-        )
-        plot_area.plotly_chart(fig, use_container_width=True)
-
-    # Streamlit reruns every second
-    st.experimental_rerun()
+# Auto refresh every second
+time.sleep(1)
+st.experimental_rerun()
