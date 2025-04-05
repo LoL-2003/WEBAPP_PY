@@ -39,11 +39,13 @@ def on_message(client, userdata, msg):
         status = payload
         status_placeholder.markdown(f"**Status:** `{status}`")
     elif msg.topic == TARGET_TOPIC:
+        print(f"[TARGET] Raw payload: {payload}")
         try:
             json_data = json.loads(payload)
+            print(f"[TARGET] Decoded JSON: {json_data}")
             data.update(json_data)
-        except:
-            print("Error decoding payload")
+        except Exception as e:
+            print(f"[TARGET] Error decoding payload: {e}")
 
 # MQTT Threading Setup
 def start_mqtt():
@@ -85,10 +87,11 @@ def display_val(val):
 
 with col2:
     st.markdown("### 📍 Target Info")
-    st.metric("X", display_val(data["x"]))
-    st.metric("Y", display_val(data["y"]))
-    st.metric("Speed", display_val(data["speed"]))
-    st.metric("Distance", display_val(data["distance"]))
+    with st.empty():
+        st.metric("X", display_val(data["x"]))
+        st.metric("Y", display_val(data["y"]))
+        st.metric("Speed", display_val(data["speed"]))
+        st.metric("Distance", display_val(data["distance"]))
 
 st.markdown("---")
 st.markdown("Developed by **Aditya Puri** 🚀")
