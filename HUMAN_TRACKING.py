@@ -75,114 +75,98 @@
 
 import streamlit as st
 import paho.mqtt.client as mqtt
-import threading
-import queue
 import json
 import plotly.graph_objs as go
-import time
+from streamlit_autorefresh import st_autorefresh
 
-# Page config
-st.set_page_config(page_title="ESP32 Human Tracking", layout="centered", initial_sidebar_state="collapsed")
-
-# Dark mode style
+# -------- Streamlit Page Config --------
+st.set_page_config(page_title="Human Tracking Dashboard", layout="centered")
 st.markdown("""
     <style>
-        body { background-color: #121212; color: white; }
-        .stMetric label, .stMetric div { color: #00ffb7; }
-        h1 { color: #00ffb7 !important; }
+    body {
+        background-color: #121212;
+        color: #E0E0E0;
+    }
+    .main {
+        background-color: #1E1E1E;
+    }
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 style='text-align:center;'>ESP32 Human Tracking Dashboard</h1>", unsafe_allow_html=True)
-st.markdown("---")
+st.title("📍 Human Tracking Dashboard")
 
-# Queue for MQTT messages
-mqtt_queue = queue.Queue()
+# -------- Global Variables --------
+latest_data = st.session_state.get("latest_data", {"X": 0, "Y": 0, "Speed": 0, "Distance": 0})
 
-# Initialize session state
-if 'plot_x' not in st.session_state:
-    st.session_state.plot_x = []
-    st.session_state.plot_y = []
-    st.session_state.x = 0
-    st.session_state.y = 0
-    st.session_state.speed = 0
-    st.session_state.distance = 0
-
-# MQTT config
-MQTT_BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
-MQTT_PORT = 8883
-MQTT_TOPIC = "esp32/sensor"
-MQTT_USERNAME = "HUMAN_TRACKING"
-MQTT_PASSWORD = "12345678aA"
-
-# MQTT callbacks
+# -------- MQTT Callbacks --------
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print("✅ MQTT connected.")
-        client.subscribe(MQTT_TOPIC)
+        st.session_state["connected"] = True
+        client.subscribe("esp32/tracking")
     else:
-        print(f"❌ MQTT connection failed: {rc}")
+        st.session_state["connected"] = False
 
 def on_message(client, userdata, msg):
     try:
-        payload = msg.payload.decode()
+        payload = msg.payload.decode("utf-8")
         data = json.loads(payload)
-        mqtt_queue.put(data)
-    except Exception as e:
-        print("MQTT parsing error:", e)
 
-# MQTT background thread
-def mqtt_thread():
+        if all(k in data for k in ("X", "Y", "Speed", "Distance")):
+            st.session_state["latest_data"] = data
+    except Exception as e:
+        print(f"[!] MQTT message error: {e}")
+
+# -------- MQTT Setup --------
+if "mqtt_initialized" not in st.session_state:
+    st.session_state["connected"] = False
+    st.session_state["latest_data"] = {"X": 0, "Y": 0, "Speed": 0, "Distance": 0}
+    st.session_state["mqtt_initialized"] = True
+
     client = mqtt.Client()
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.tls_set()
+    client.username_pw_set("HUMAN_TRACKING", "12345678aA")
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(MQTT_BROKER, MQTT_PORT)
-    client.loop_forever()
+    client.tls_set()
+    client.connect("b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud", 8883, 60)
+    client.loop_start()
 
-# Start thread once
-if 'mqtt_started' not in st.session_state:
-    threading.Thread(target=mqtt_thread, daemon=True).start()
-    st.session_state.mqtt_started = True
+# -------- Auto Refresh --------
+st_autorefresh(interval=1000, key="data_refresh")
 
-# Process MQTT messages (if any)
-if not mqtt_queue.empty():
-    data = mqtt_queue.get()
-    st.session_state.x = data.get("x", 0)
-    st.session_state.y = data.get("y", 0)
-    st.session_state.speed = data.get("speed", 0)
-    st.session_state.distance = data.get("distance", 0)
-    st.session_state.plot_x.append(st.session_state.x)
-    st.session_state.plot_y.append(st.session_state.y)
+# -------- UI Display --------
+data = st.session_state["latest_data"]
+st.markdown("### 📡 Live Tracking Data")
 
-# Show metrics
 col1, col2 = st.columns(2)
-col3, col4 = st.columns(2)
+with col1:
+    st.metric("🧭 X Coordinate", f"{data['X']}")
+    st.metric("🏃 Speed", f"{data['Speed']} m/s")
+with col2:
+    st.metric("🧭 Y Coordinate", f"{data['Y']}")
+    st.metric("📏 Distance", f"{data['Distance']} m")
 
-col1.metric("X Coordinate", st.session_state.x)
-col2.metric("Y Coordinate", st.session_state.y)
-col3.metric("Speed", f"{st.session_state.speed:.2f}")
-col4.metric("Distance", f"{st.session_state.distance:.2f}")
-
-# Live plot
+# -------- Simple Plot --------
 fig = go.Figure()
 fig.add_trace(go.Scatter(
-    x=st.session_state.plot_x,
-    y=st.session_state.plot_y,
-    mode="lines+markers",
-    line=dict(color="#00ffb7")
+    x=[0, data["X"]],
+    y=[0, data["Y"]],
+    mode='lines+markers',
+    marker=dict(color="lightgreen", size=10),
+    line=dict(color="cyan", width=2)
 ))
 fig.update_layout(
-    title="Live Target Path",
-    plot_bgcolor="#1e1e1e",
-    paper_bgcolor="#121212",
-    font_color="#ffffff",
+    title="Real-Time Position",
     xaxis_title="X",
     yaxis_title="Y",
+    plot_bgcolor="#1E1E1E",
+    paper_bgcolor="#1E1E1E",
+    font=dict(color="#E0E0E0"),
+    xaxis=dict(showgrid=False),
+    yaxis=dict(showgrid=False)
 )
-st.plotly_chart(fig, use_container_width=True)
 
-# Auto refresh every second
-time.sleep(1)
-st.experimental_rerun()
+st.plotly_chart(fig, use_container_width=True)
