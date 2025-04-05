@@ -65,6 +65,9 @@ if "mqtt_started" not in st.session_state:
 # LED Control buttons
 with col1:
     st.markdown("### 🔘 LED Control")
+    led_status = status.lower()
+    st.markdown(f"<div style='font-size:30px;'>🔴</div>", unsafe_allow_html=True)  # Static indicator
+
     if st.button("Turn ON"):
         pub = mqtt.Client()
         pub.username_pw_set(USERNAME, PASSWORD)
@@ -87,11 +90,10 @@ def display_val(val):
 
 with col2:
     st.markdown("### 📍 Target Info")
-    with st.empty():
-        st.metric("X", display_val(data["x"]))
-        st.metric("Y", display_val(data["y"]))
-        st.metric("Speed", display_val(data["speed"]))
-        st.metric("Distance", display_val(data["distance"]))
+    st.metric("X", display_val(data["x"]))
+    st.metric("Y", display_val(data["y"]))
+    st.metric("Speed", display_val(data["speed"]))
+    st.metric("Distance", display_val(data["distance"]))
 
 st.markdown("---")
 st.markdown("Developed by **Aditya Puri** 🚀")
