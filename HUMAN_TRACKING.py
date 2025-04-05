@@ -81,18 +81,6 @@ from streamlit_autorefresh import st_autorefresh
 
 # -------- Streamlit Page Config --------
 st.set_page_config(page_title="Human Tracking Dashboard", layout="centered")
-
-# -------- Initialize Session State Keys --------
-if "mqtt_initialized" not in st.session_state:
-    st.session_state["mqtt_initialized"] = False
-if "latest_data" not in st.session_state:
-    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
-if "mqtt_status" not in st.session_state:
-    st.session_state["mqtt_status"] = "Connecting..."
-if "mqtt_client" not in st.session_state:
-    st.session_state["mqtt_client"] = None
-
-# -------- Custom Styling --------
 st.markdown("""
     <style>
     body {
@@ -109,15 +97,32 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📍 Human Tracking Dashboard")
+# -------- MQTT Config --------
+BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
+PORT = 8883
+TOPIC = "esp32/tracking"
+LED_TOPIC = "esp32/led"
+USERNAME = "HUMAN_TRACKING"
+PASSWORD = "12345678aA"
 
-# -------- MQTT Callback Functions --------
+# -------- Init Session State --------
+if "mqtt_status" not in st.session_state:
+    st.session_state["mqtt_status"] = "Connecting..."
+if "latest_data" not in st.session_state:
+    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
+if "led_state" not in st.session_state:
+    st.session_state["led_state"] = False
+
+# -------- MQTT Callbacks --------
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         st.session_state["mqtt_status"] = "Online"
-        client.subscribe("esp32/tracking")
+        client.subscribe(TOPIC)
     else:
-        st.session_state["mqtt_status"] = f"Failed (code {rc})"
+        st.session_state["mqtt_status"] = "Failed"
+
+def on_disconnect(client, userdata, rc):
+    st.session_state["mqtt_status"] = "Disconnected"
 
 def on_message(client, userdata, msg):
     try:
@@ -126,31 +131,31 @@ def on_message(client, userdata, msg):
         if all(k in parsed for k in ("x", "y", "speed", "distance")):
             st.session_state["latest_data"] = parsed
     except Exception as e:
-        print(f"[!] MQTT message error: {e}")
+        print(f"[!] Error decoding MQTT: {e}")
 
-# -------- MQTT Initialization --------
-if not st.session_state["mqtt_initialized"]:
-    mqtt_client = mqtt.Client()
-    mqtt_client.username_pw_set("HUMAN_TRACKING", "12345678aA")  # Replace with your credentials
-    mqtt_client.on_connect = on_connect
-    mqtt_client.on_message = on_message
-    mqtt_client.tls_set()  # SSL/TLS enabled
-    mqtt_client.connect("b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud", 8883, 60)
-    mqtt_client.loop_start()
+# -------- MQTT Init (Once) --------
+if "mqtt_client" not in st.session_state:
+    client = mqtt.Client()
+    client.username_pw_set(USERNAME, PASSWORD)
+    client.tls_set()
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+    client.connect(BROKER, PORT, 60)
+    client.loop_start()
+    st.session_state["mqtt_client"] = client
 
-    st.session_state["mqtt_initialized"] = True
-    st.session_state["mqtt_client"] = mqtt_client
+# -------- Title & Status --------
+st.title("📍 Human Tracking Dashboard")
 
-# -------- Auto Refresh --------
-st_autorefresh(interval=1000, key="autorefresh")
+mqtt_status = st.session_state.get("mqtt_status", "Connecting...")
+status_color = "🟢" if mqtt_status == "Online" else "🔴"
+st.markdown(f"### {status_color} MQTT Status: <code>{mqtt_status}</code>", unsafe_allow_html=True)
 
-# -------- Live Status & Data --------
-status_color = "🟢" if "Online" in st.session_state["mqtt_status"] else "🔴"
-st.markdown(f"### {status_color} MQTT Status: `{st.session_state['mqtt_status']}`")
+# -------- Live Tracking Metrics --------
+data = st.session_state.get("latest_data", {"x": 0, "y": 0, "speed": 0, "distance": 0})
+st.markdown("## 🛰️ Live Tracking Data")
 
-data = st.session_state["latest_data"]
-
-st.markdown("### 📡 Live Tracking Data")
 col1, col2 = st.columns(2)
 with col1:
     st.metric("🧭 X Coordinate", f"{data['x']}")
@@ -159,7 +164,22 @@ with col2:
     st.metric("🧭 Y Coordinate", f"{data['y']}")
     st.metric("📏 Distance", f"{data['distance']} m")
 
-# -------- Real-time Position Plot --------
+# -------- LED Toggle --------
+st.markdown("---")
+led_col = st.columns([1, 3, 1])[1]
+with led_col:
+    led_toggle = st.toggle("💡 LED Control", value=st.session_state["led_state"])
+
+# Update LED state and publish if changed
+if led_toggle != st.session_state["led_state"]:
+    st.session_state["led_state"] = led_toggle
+    led_msg = "ON" if led_toggle else "OFF"
+    try:
+        st.session_state["mqtt_client"].publish(LED_TOPIC, led_msg)
+    except:
+        st.warning("⚠️ MQTT not connected. LED command not sent.")
+
+# -------- Real-Time Position Graph --------
 fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=[0, data["x"]],
@@ -179,3 +199,6 @@ fig.update_layout(
     yaxis=dict(showgrid=False)
 )
 st.plotly_chart(fig, use_container_width=True)
+
+# -------- Auto Refresh --------
+st_autorefresh(interval=1000, key="refresh")
