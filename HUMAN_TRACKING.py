@@ -81,6 +81,18 @@ from streamlit_autorefresh import st_autorefresh
 
 # -------- Streamlit Page Config --------
 st.set_page_config(page_title="Human Tracking Dashboard", layout="centered")
+
+# -------- Initialize Session State Keys --------
+if "mqtt_initialized" not in st.session_state:
+    st.session_state["mqtt_initialized"] = False
+if "latest_data" not in st.session_state:
+    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
+if "mqtt_status" not in st.session_state:
+    st.session_state["mqtt_status"] = "Connecting..."
+if "mqtt_client" not in st.session_state:
+    st.session_state["mqtt_client"] = None
+
+# -------- Custom Styling --------
 st.markdown("""
     <style>
     body {
@@ -99,46 +111,43 @@ st.markdown("""
 
 st.title("📍 Human Tracking Dashboard")
 
-# -------- MQTT Callbacks --------
+# -------- MQTT Callback Functions --------
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        client.subscribe("esp32/target")
-        client.subscribe("esp32/status")
-        st.session_state["mqtt_status"] = "Device Online"
+        st.session_state["mqtt_status"] = "Online"
+        client.subscribe("esp32/tracking")
     else:
-        st.session_state["mqtt_status"] = "Connection Failed"
+        st.session_state["mqtt_status"] = f"Failed (code {rc})"
 
 def on_message(client, userdata, msg):
     try:
         payload = msg.payload.decode("utf-8")
-        if msg.topic == "esp32/target":
-            parsed = json.loads(payload)
-            if all(k in parsed for k in ("x", "y", "speed", "distance")):
-                st.session_state["latest_data"] = parsed
-        elif msg.topic == "esp32/status":
-            st.session_state["mqtt_status"] = payload
+        parsed = json.loads(payload)
+        if all(k in parsed for k in ("x", "y", "speed", "distance")):
+            st.session_state["latest_data"] = parsed
     except Exception as e:
         print(f"[!] MQTT message error: {e}")
 
-# -------- MQTT Init --------
-if "mqtt_initialized" not in st.session_state:
-    st.session_state["mqtt_initialized"] = True
-    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
-    st.session_state["mqtt_status"] = "Connecting..."
+# -------- MQTT Initialization --------
+if not st.session_state["mqtt_initialized"]:
+    mqtt_client = mqtt.Client()
+    mqtt_client.username_pw_set("HUMAN_TRACKING", "12345678aA")  # Replace with your credentials
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_message = on_message
+    mqtt_client.tls_set()  # SSL/TLS enabled
+    mqtt_client.connect("b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud", 8883, 60)
+    mqtt_client.loop_start()
 
-    client = mqtt.Client()
-    client.username_pw_set("HUMAN_TRACKING", "12345678aA")
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.tls_set()
-    client.connect("b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud", 8883, 60)
-    client.loop_start()
-    st.session_state["mqtt_client"] = client
+    st.session_state["mqtt_initialized"] = True
+    st.session_state["mqtt_client"] = mqtt_client
 
 # -------- Auto Refresh --------
-st_autorefresh(interval=1000, key="mqtt-refresh")
+st_autorefresh(interval=1000, key="autorefresh")
 
-# -------- Display Live Data --------
+# -------- Live Status & Data --------
+status_color = "🟢" if "Online" in st.session_state["mqtt_status"] else "🔴"
+st.markdown(f"### {status_color} MQTT Status: `{st.session_state['mqtt_status']}`")
+
 data = st.session_state["latest_data"]
 
 st.markdown("### 📡 Live Tracking Data")
@@ -150,25 +159,7 @@ with col2:
     st.metric("🧭 Y Coordinate", f"{data['y']}")
     st.metric("📏 Distance", f"{data['distance']} m")
 
-# -------- Device Status --------
-status_color = "🟢" if "Online" in st.session_state["mqtt_status"] else "🔴"
-st.markdown(f"### {status_color} Status: **{st.session_state['mqtt_status']}**")
-
-# -------- Control Buttons --------
-st.markdown("### 🎮 Control Panel")
-col_on, col_off = st.columns(2)
-with col_on:
-    if st.button("Turn ON"):
-        client = st.session_state.get("mqtt_client")
-        if client:
-            client.publish("esp32/control", "ON")
-with col_off:
-    if st.button("Turn OFF"):
-        client = st.session_state.get("mqtt_client")
-        if client:
-            client.publish("esp32/control", "OFF")
-
-# -------- Real-time XY Plot --------
+# -------- Real-time Position Plot --------
 fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=[0, data["x"]],
@@ -178,9 +169,9 @@ fig.add_trace(go.Scatter(
     line=dict(color="cyan", width=2)
 ))
 fig.update_layout(
-    title="📍 Real-Time Target Position",
-    xaxis_title="X Axis",
-    yaxis_title="Y Axis",
+    title="Real-Time Position",
+    xaxis_title="X",
+    yaxis_title="Y",
     plot_bgcolor="#1E1E1E",
     paper_bgcolor="#1E1E1E",
     font=dict(color="#E0E0E0"),
