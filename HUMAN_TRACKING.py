@@ -77,104 +77,75 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import json
 import threading
-import time
-import plotly.graph_objs as go
-from collections import deque
 
-# MQTT Credentials
+# MQTT Configuration
 MQTT_BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
-MQTT_PORT = 8883
+MQTT_PORT = 8884
+MQTT_USERNAME = "HUMAN_TRACKING"
+MQTT_PASSWORD = "12345678aA"
 MQTT_TOPIC_TARGET = "esp32/target"
 MQTT_TOPIC_STATUS = "esp32/status"
 MQTT_TOPIC_CONTROL = "esp32/control"
-MQTT_USERNAME = "HUMAN_TRACKING"
-MQTT_PASSWORD = "12345678aA"
 
-# Global state
-status = "Offline"
-sensor_data = {"x": 0, "y": 0, "speed": 0, "distance": 0}
-data_buffer = deque(maxlen=100)
+# Shared variables for data storage
+latest_data = {"x": None, "y": None, "speed": None, "distance": None}
+status = "Connecting..."
 
-# MQTT Setup
+# MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
+        print("✅ Connected to MQTT Broker")
         client.subscribe(MQTT_TOPIC_TARGET)
         client.subscribe(MQTT_TOPIC_STATUS)
+    else:
+        print("❌ Failed to connect, return code %d\n", rc)
 
 def on_message(client, userdata, msg):
-    global status, sensor_data, data_buffer
-    if msg.topic == MQTT_TOPIC_STATUS:
-        status = msg.payload.decode()
-    elif msg.topic == MQTT_TOPIC_TARGET:
+    global latest_data, status
+    if msg.topic == MQTT_TOPIC_TARGET:
         try:
             payload = json.loads(msg.payload.decode())
-            sensor_data.update(payload)
-            data_buffer.append({
-                "x": payload["x"],
-                "y": payload["y"],
-                "speed": payload["speed"],
-                "distance": payload["distance"]
-            })
+            latest_data.update(payload)
         except Exception as e:
-            print("JSON parse error:", e)
+            print("Payload Error:", e)
+    elif msg.topic == MQTT_TOPIC_STATUS:
+        status = msg.payload.decode()
 
-def mqtt_thread():
+# MQTT Setup
+def connect_mqtt():
     client = mqtt.Client()
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.tls_set()
+    client.tls_set()  # Enable SSL/TLS
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.loop_forever()
+    return client
 
-# Start MQTT in background
-threading.Thread(target=mqtt_thread, daemon=True).start()
+mqtt_client = connect_mqtt()
+mqtt_thread = threading.Thread(target=mqtt_client.loop_forever)
+mqtt_thread.daemon = True
+mqtt_thread.start()
 
 # Streamlit UI
-st.set_page_config(page_title="Human Tracking Dashboard", layout="wide", page_icon="📡")
-st.title("📡 Real-Time Human Tracking Dashboard")
+st.set_page_config(page_title="ESP32 Control Panel", layout="centered")
+st.title("💡 ESP32 Control Panel")
 
-col1, col2 = st.columns([1, 3])
+col1, col2 = st.columns(2)
 
 with col1:
-    if status.lower() == "device online":
-        st.markdown("**Status:** 🟢 Online")
-    else:
-        st.markdown("**Status:** 🔴 Offline")
+    st.markdown("### 🔘 LED Control")
+    if st.button("Turn ON"):
+        mqtt_client.publish(MQTT_TOPIC_CONTROL, "ON")
+    if st.button("Turn OFF"):
+        mqtt_client.publish(MQTT_TOPIC_CONTROL, "OFF")
+    st.markdown(f"**Status:** `{status}`")
 
-    if st.button("Turn ON 🌞"):
-        mqtt.Client().publish(MQTT_TOPIC_CONTROL, "ON")
-    if st.button("Turn OFF 🌙"):
-        mqtt.Client().publish(MQTT_TOPIC_CONTROL, "OFF")
+def safe(val):
+    return val if val is not None else "..."
 
-st.success(f"Sent: {status}")
-
-# Graph
-st.markdown("## 📊 Real-Time Sensor Graph")
-if len(data_buffer) > 0:
-    xs = [d["x"] for d in data_buffer]
-    ys = [d["y"] for d in data_buffer]
-    speeds = [d["speed"] for d in data_buffer]
-    distances = [d["distance"] for d in data_buffer]
-    timestamps = list(range(len(data_buffer)))
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(x=timestamps, y=xs, mode='lines+markers', name='X'))
-    fig.add_trace(go.Scatter(x=timestamps, y=ys, mode='lines+markers', name='Y'))
-    fig.add_trace(go.Scatter(x=timestamps, y=speeds, mode='lines+markers', name='Speed'))
-    fig.add_trace(go.Scatter(x=timestamps, y=distances, mode='lines+markers', name='Distance'))
-
-    fig.update_layout(title="Sensor Data Over Time", xaxis_title="Time", yaxis_title="Values",
-                      template="plotly_dark")
-
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("Waiting for data from ESP32...")
-
-# Live values
-st.markdown("## 🔍 Current Sensor Values")
-st.metric(label="X", value=sensor_data["x"])
-st.metric(label="Y", value=sensor_data["y"])
-st.metric(label="Speed", value=sensor_data["speed"])
-st.metric(label="Distance", value=sensor_data["distance"])
+with col2:
+    st.markdown("### 📍 Target Info")
+    st.metric(label="X", value=safe(latest_data["x"]))
+    st.metric(label="Y", value=safe(latest_data["y"]))
+    st.metric(label="Speed", value=safe(latest_data["speed"]))
+    st.metric(label="Distance", value=safe(latest_data["distance"]))
