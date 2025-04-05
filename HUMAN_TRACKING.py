@@ -75,130 +75,106 @@
 
 import streamlit as st
 import paho.mqtt.client as mqtt
+import threading
 import json
 import plotly.graph_objs as go
-from streamlit_autorefresh import st_autorefresh
 
-# -------- Streamlit Page Config --------
-st.set_page_config(page_title="Human Tracking Dashboard", layout="centered")
-st.markdown("""
-    <style>
-    body {
-        background-color: #121212;
-        color: #E0E0E0;
-    }
-    .main {
-        background-color: #1E1E1E;
-    }
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# -------- MQTT Config --------
+# MQTT Settings
 BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
 PORT = 8883
-TOPIC = "esp32/tracking"
-LED_TOPIC = "esp32/led"
 USERNAME = "HUMAN_TRACKING"
 PASSWORD = "12345678aA"
 
-# -------- Init Session State --------
-if "mqtt_status" not in st.session_state:
-    st.session_state["mqtt_status"] = "Connecting..."
-if "latest_data" not in st.session_state:
-    st.session_state["latest_data"] = {"x": 0, "y": 0, "speed": 0, "distance": 0}
-if "led_state" not in st.session_state:
-    st.session_state["led_state"] = False
+TOPIC_TRACKING = "esp32/tracking"
+TOPIC_LED = "esp32/led"
 
-# -------- MQTT Callbacks --------
+# Streamlit UI settings
+st.set_page_config(page_title="Human Tracking Dashboard", layout="centered")
+st.title("📍 Human Tracking Dashboard")
+
+# Realtime UI
+status_placeholder = st.empty()
+data_placeholder = st.empty()
+plot_placeholder = st.empty()
+led_placeholder = st.empty()
+
+# Global state variables
+device_status = "Connecting..."
+latest_data = {"x": 0, "y": 0, "speed": 0, "distance": 0}
+led_state = False
+
+# MQTT callbacks
 def on_connect(client, userdata, flags, rc):
+    global device_status
     if rc == 0:
-        st.session_state["mqtt_status"] = "Online"
-        client.subscribe(TOPIC)
+        device_status = "🟢 Online"
+        client.subscribe(TOPIC_TRACKING)
     else:
-        st.session_state["mqtt_status"] = "Failed"
-
-def on_disconnect(client, userdata, rc):
-    st.session_state["mqtt_status"] = "Disconnected"
+        device_status = f"🔴 Failed (Code {rc})"
 
 def on_message(client, userdata, msg):
+    global latest_data
     try:
-        payload = msg.payload.decode("utf-8")
+        payload = msg.payload.decode()
         parsed = json.loads(payload)
         if all(k in parsed for k in ("x", "y", "speed", "distance")):
-            st.session_state["latest_data"] = parsed
+            latest_data = parsed
     except Exception as e:
-        print(f"[!] Error decoding MQTT: {e}")
+        print(f"[!] MQTT decode error: {e}")
 
-# -------- MQTT Init (Once) --------
-if "mqtt_client" not in st.session_state:
+# Start MQTT in background thread
+def start_mqtt():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
     client.tls_set()
     client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
     client.on_message = on_message
-    client.connect(BROKER, PORT, 60)
-    client.loop_start()
-    st.session_state["mqtt_client"] = client
+    client.connect(BROKER, PORT)
+    client.loop_forever()
 
-# -------- Title & Status --------
-st.title("📍 Human Tracking Dashboard")
+if "mqtt_started" not in st.session_state:
+    threading.Thread(target=start_mqtt, daemon=True).start()
+    st.session_state["mqtt_started"] = True
 
-mqtt_status = st.session_state.get("mqtt_status", "Connecting...")
-status_color = "🟢" if mqtt_status == "Online" else "🔴"
-st.markdown(f"### {status_color} MQTT Status: <code>{mqtt_status}</code>", unsafe_allow_html=True)
+# Display status
+status_placeholder.markdown(f"### {device_status}")
 
-# -------- Live Tracking Metrics --------
-data = st.session_state.get("latest_data", {"x": 0, "y": 0, "speed": 0, "distance": 0})
-st.markdown("## 🛰️ Live Tracking Data")
-
+# Show tracking metrics
 col1, col2 = st.columns(2)
-with col1:
-    st.metric("🧭 X Coordinate", f"{data['x']}")
-    st.metric("🏃 Speed", f"{data['speed']} m/s")
-with col2:
-    st.metric("🧭 Y Coordinate", f"{data['y']}")
-    st.metric("📏 Distance", f"{data['distance']} m")
+col1.metric("🧭 X", latest_data["x"])
+col1.metric("🏃 Speed", f"{latest_data['speed']} m/s")
+col2.metric("🧭 Y", latest_data["y"])
+col2.metric("📏 Distance", f"{latest_data['distance']} m")
 
-# -------- LED Toggle --------
-st.markdown("---")
-led_col = st.columns([1, 3, 1])[1]
-with led_col:
-    led_toggle = st.toggle("💡 LED Control", value=st.session_state["led_state"])
+# LED Toggle
+led_state = led_placeholder.toggle("💡 LED", value=st.session_state.get("led", False))
 
-# Update LED state and publish if changed
-if led_toggle != st.session_state["led_state"]:
-    st.session_state["led_state"] = led_toggle
-    led_msg = "ON" if led_toggle else "OFF"
-    try:
-        st.session_state["mqtt_client"].publish(LED_TOPIC, led_msg)
-    except:
-        st.warning("⚠️ MQTT not connected. LED command not sent.")
+# Publish LED control when toggled
+if led_state != st.session_state.get("led", False):
+    st.session_state["led"] = led_state
+    pub = mqtt.Client()
+    pub.username_pw_set(USERNAME, PASSWORD)
+    pub.tls_set()
+    pub.connect(BROKER, PORT)
+    pub.publish(TOPIC_LED, "ON" if led_state else "OFF")
 
-# -------- Real-Time Position Graph --------
+# Real-time Position Plot
 fig = go.Figure()
 fig.add_trace(go.Scatter(
-    x=[0, data["x"]],
-    y=[0, data["y"]],
-    mode='lines+markers',
-    marker=dict(color="lightgreen", size=10),
-    line=dict(color="cyan", width=2)
+    x=[0, latest_data["x"]],
+    y=[0, latest_data["y"]],
+    mode="lines+markers",
+    marker=dict(color="orange", size=10),
+    line=dict(color="cyan", width=2),
 ))
 fig.update_layout(
-    title="Real-Time Position",
+    title="Real-Time Target Position",
     xaxis_title="X",
     yaxis_title="Y",
-    plot_bgcolor="#1E1E1E",
-    paper_bgcolor="#1E1E1E",
-    font=dict(color="#E0E0E0"),
-    xaxis=dict(showgrid=False),
-    yaxis=dict(showgrid=False)
+    template="plotly_dark",
+    height=400
 )
-st.plotly_chart(fig, use_container_width=True)
+plot_placeholder.plotly_chart(fig, use_container_width=True)
 
-# -------- Auto Refresh --------
-st_autorefresh(interval=1000, key="refresh")
+# Refresh every 1 sec
+st.experimental_rerun()
