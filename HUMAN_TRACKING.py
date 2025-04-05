@@ -76,53 +76,30 @@
 import streamlit as st
 import paho.mqtt.client as mqtt
 import threading
-import json
-import plotly.graph_objs as go
+from streamlit_autorefresh import st_autorefresh
 
-# MQTT Settings
+# MQTT Broker Configuration
 BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
 PORT = 8883
 USERNAME = "HUMAN_TRACKING"
 PASSWORD = "12345678aA"
+CONTROL_TOPIC = "esp32/control"
+STATUS_TOPIC = "esp32/status"
 
-TOPIC_TRACKING = "esp32/tracking"
-TOPIC_LED = "esp32/led"
-
-# Streamlit UI settings
-st.set_page_config(page_title="Human Tracking Dashboard", layout="centered")
-st.title("📍 Human Tracking Dashboard")
-
-# Realtime UI
-status_placeholder = st.empty()
-data_placeholder = st.empty()
-plot_placeholder = st.empty()
-led_placeholder = st.empty()
-
-# Global state variables
-device_status = "Connecting..."
-latest_data = {"x": 0, "y": 0, "speed": 0, "distance": 0}
-led_state = False
-
-# MQTT callbacks
 def on_connect(client, userdata, flags, rc):
-    global device_status
     if rc == 0:
-        device_status = "🟢 Online"
-        client.subscribe(TOPIC_TRACKING)
+        client.subscribe(STATUS_TOPIC)
+        st.session_state["mqtt_status"] = "Online"
     else:
-        device_status = f"🔴 Failed (Code {rc})"
+        st.session_state["mqtt_status"] = f"Connection failed: {rc}"
 
 def on_message(client, userdata, msg):
-    global latest_data
-    try:
+    if msg.topic == STATUS_TOPIC:
         payload = msg.payload.decode()
-        parsed = json.loads(payload)
-        if all(k in parsed for k in ("x", "y", "speed", "distance")):
-            latest_data = parsed
-    except Exception as e:
-        print(f"[!] MQTT decode error: {e}")
+        st.session_state["device_status"] = payload
 
-# Start MQTT in background thread
+# MQTT Thread
+
 def start_mqtt():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
@@ -132,49 +109,55 @@ def start_mqtt():
     client.connect(BROKER, PORT)
     client.loop_forever()
 
+# Streamlit Page Config
+st.set_page_config(page_title="Human Tracking Dashboard", page_icon="📍", layout="centered")
+st.title("📍 Human Tracking Dashboard")
+
+# Auto refresh every 1s
+st_autorefresh(interval=1000, key="data_refresh")
+
+# Initialize session state if not already
 if "mqtt_started" not in st.session_state:
     threading.Thread(target=start_mqtt, daemon=True).start()
     st.session_state["mqtt_started"] = True
+    st.session_state["mqtt_status"] = "Connecting..."
+    st.session_state["device_status"] = "Offline"
 
-# Display status
-status_placeholder.markdown(f"### {device_status}")
+# Display MQTT Status
+status_color = "🟢" if "Online" in st.session_state["mqtt_status"] else "🔴"
+st.markdown(f"### {status_color} MQTT Status: `{st.session_state['mqtt_status']}`")
 
-# Show tracking metrics
+# Display Live Data (Placeholder if no data)
 col1, col2 = st.columns(2)
-col1.metric("🧭 X", latest_data["x"])
-col1.metric("🏃 Speed", f"{latest_data['speed']} m/s")
-col2.metric("🧭 Y", latest_data["y"])
-col2.metric("📏 Distance", f"{latest_data['distance']} m")
+col3, col4 = st.columns(2)
 
-# LED Toggle
-led_state = led_placeholder.toggle("💡 LED", value=st.session_state.get("led", False))
+col1.metric("🧭 X Coordinate", "0")
+col2.metric("🧭 Y Coordinate", "0")
+col3.metric("🏃 Speed", "0 m/s")
+col4.metric("📏 Distance", "0 m")
 
-# Publish LED control when toggled
-if led_state != st.session_state.get("led", False):
-    st.session_state["led"] = led_state
-    pub = mqtt.Client()
-    pub.username_pw_set(USERNAME, PASSWORD)
-    pub.tls_set()
-    pub.connect(BROKER, PORT)
-    pub.publish(TOPIC_LED, "ON" if led_state else "OFF")
+st.markdown("---")
+st.subheader("🔦 Control LEDs on ESP32")
 
-# Real-time Position Plot
-fig = go.Figure()
-fig.add_trace(go.Scatter(
-    x=[0, latest_data["x"]],
-    y=[0, latest_data["y"]],
-    mode="lines+markers",
-    marker=dict(color="orange", size=10),
-    line=dict(color="cyan", width=2),
-))
-fig.update_layout(
-    title="Real-Time Target Position",
-    xaxis_title="X",
-    yaxis_title="Y",
-    template="plotly_dark",
-    height=400
-)
-plot_placeholder.plotly_chart(fig, use_container_width=True)
+# Button Controls
+col_on, col_off = st.columns(2)
+with col_on:
+    if st.button("🔆 Turn ON"):
+        pub = mqtt.Client()
+        pub.username_pw_set(USERNAME, PASSWORD)
+        pub.tls_set()
+        pub.connect(BROKER, PORT)
+        pub.publish(CONTROL_TOPIC, "ON")
+        st.success("ON command sent")
 
-# Refresh every 1 sec
-st.experimental_rerun()
+with col_off:
+    if st.button("🌙 Turn OFF"):
+        pub = mqtt.Client()
+        pub.username_pw_set(USERNAME, PASSWORD)
+        pub.tls_set()
+        pub.connect(BROKER, PORT)
+        pub.publish(CONTROL_TOPIC, "OFF")
+        st.success("OFF command sent")
+
+st.markdown("---")
+st.caption("Developed by **Aditya Puri** 🚀")
