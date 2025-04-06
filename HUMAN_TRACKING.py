@@ -19,19 +19,22 @@ TOPIC_PUB = "esp32/control"
 # Global variables
 client = None
 received_messages = []
-lock = threading.Lock()  # To safely update received_messages
+lock = threading.Lock()
 
 # Callback functions
 def on_connect(client, userdata, flags, rc):
+    global received_messages
     if rc == 0:
         st.session_state.status = "✅ Connected to MQTT Broker"
         client.subscribe(TOPIC_SUB)
+        st.write("Subscribed to topic:", TOPIC_SUB)
     else:
         st.session_state.status = f"❌ Failed to connect, return code {rc}"
 
 def on_message(client, userdata, msg):
     global received_messages
     try:
+        st.write(f"Message received on topic: {msg.topic}")  # Debug output
         data = json.loads(msg.payload.decode())
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = {
@@ -45,6 +48,7 @@ def on_message(client, userdata, msg):
             received_messages.append(message)
             if len(received_messages) > 10:
                 received_messages.pop(0)
+        st.session_state.messages = received_messages.copy()  # Force UI update
     except Exception as e:
         st.session_state.error = f"⚠️ Error decoding message: {str(e)}"
 
@@ -60,16 +64,10 @@ def init_mqtt():
     
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        client.loop_start()
+        st.write("Attempting to connect to MQTT broker...")
     except Exception as e:
         st.session_state.status = f"❌ Connection failed: {str(e)}"
-
-# Background task to keep Streamlit updated
-def update_ui():
-    while True:
-        with lock:
-            st.session_state.messages = received_messages.copy()
-        time.sleep(1)  # Update every second
+    client.loop_start()
 
 # Streamlit UI
 def main():
@@ -86,7 +84,6 @@ def main():
     # Initialize MQTT if not already done
     if client is None:
         init_mqtt()
-        threading.Thread(target=update_ui, daemon=True).start()
 
     # Status display
     st.subheader("Connection Status")
@@ -106,6 +103,7 @@ def main():
 
     # Received messages display
     st.subheader("Received Data")
+    messages_placeholder = st.empty()
     if st.session_state.messages:
         for msg in reversed(st.session_state.messages):
             with st.expander(f"Message at {msg['timestamp']}"):
@@ -114,7 +112,7 @@ def main():
                 st.write(f"Speed: {msg['speed']}")
                 st.write(f"Distance: {msg['distance']}")
     else:
-        st.write("No messages received yet...")
+        messages_placeholder.write("No messages received yet...")
 
     # Error display
     if st.session_state.error:
