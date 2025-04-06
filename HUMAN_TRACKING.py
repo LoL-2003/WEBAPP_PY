@@ -2,71 +2,69 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import threading
 import json
+import ssl
 
-# HiveMQ Broker Details
-BROKER = "b1040f453c014b0fb5eeebc408edf63d.s1.eu.hivemq.cloud"
+# MQTT Configuration
+BROKER = "chameleon.lmq.cloudamqp.com"
 PORT = 8883
-USERNAME = "HUMAN_TRACKING"
-PASSWORD = "12345678aA"
+USERNAME = "xaygsnkk:xaygsnkk"
+PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 
 CONTROL_TOPIC = "esp32/control"
 STATUS_TOPIC = "esp32/status"
 TARGET_TOPIC = "esp32/target"
 
 # Shared state
-status = "Connecting..."
-data = {"x": None, "y": None, "speed": None, "distance": None}
+status = st.session_state.get("status", "Connecting...")
+data = st.session_state.get("data", {"x": None, "y": None, "speed": None, "distance": None})
 
-# Streamlit UI settings
+# Streamlit UI
 st.set_page_config(page_title="ESP32 Control Panel", page_icon="💡", layout="centered")
 st.title("💡 ESP32 Control Panel")
 
 col1, col2 = st.columns(2)
 status_placeholder = col1.empty()
+status_placeholder.markdown(f"**Status:** `{status}`")
 
-# MQTT callbacks
+# MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         client.subscribe(STATUS_TOPIC)
         client.subscribe(TARGET_TOPIC)
     else:
-        print(f"Failed to connect: {rc}")
+        print(f"MQTT Connection failed with code {rc}")
 
 def on_message(client, userdata, msg):
-    global status, data
     payload = msg.payload.decode()
     if msg.topic == STATUS_TOPIC:
-        status = payload
-        status_placeholder.markdown(f"**Status:** `{status}`")
+        st.session_state["status"] = payload
     elif msg.topic == TARGET_TOPIC:
-        print(f"[TARGET] Raw payload: {payload}")
         try:
             json_data = json.loads(payload)
-            print(f"[TARGET] Decoded JSON: {json_data}")
-            data.update(json_data)
+            st.session_state["data"] = json_data
         except Exception as e:
-            print(f"[TARGET] Error decoding payload: {e}")
+            print(f"Error decoding message: {e}")
 
-# MQTT Threading Setup
+# MQTT Thread
 def start_mqtt():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
-    client.tls_set()
+    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(BROKER, PORT)
     client.loop_forever()
 
-# Start MQTT once
+# Run MQTT only once
 if "mqtt_started" not in st.session_state:
     threading.Thread(target=start_mqtt, daemon=True).start()
     st.session_state["mqtt_started"] = True
 
-# LED Control buttons
+# LED Control Section
 with col1:
     st.markdown("### 🔘 LED Control")
-    led_status = status.lower()
-    st.markdown(f"<div style='font-size:30px;'>🔴</div>", unsafe_allow_html=True)  # Static indicator
+    led_color = "🟢" if st.session_state.get("status") == "ON" else "🔴"
+    st.markdown(f"<div style='font-size:48px;'>{led_color}</div>", unsafe_allow_html=True)
 
     if st.button("Turn ON"):
         pub = mqtt.Client()
@@ -74,7 +72,7 @@ with col1:
         pub.tls_set()
         pub.connect(BROKER, PORT)
         pub.publish(CONTROL_TOPIC, "ON")
-        st.success("Command 'ON' sent!")
+        st.success("Sent 'ON' command")
 
     if st.button("Turn OFF"):
         pub = mqtt.Client()
@@ -82,18 +80,17 @@ with col1:
         pub.tls_set()
         pub.connect(BROKER, PORT)
         pub.publish(CONTROL_TOPIC, "OFF")
-        st.success("Command 'OFF' sent!")
+        st.success("Sent 'OFF' command")
 
-# Target Data Display
-def display_val(val):
-    return val if val is not None else "..."
+# Target Sensor Data
+def show_val(v): return v if v is not None else "..."
 
 with col2:
-    st.markdown("### 📍 Target Info")
-    st.metric("X", display_val(data["x"]))
-    st.metric("Y", display_val(data["y"]))
-    st.metric("Speed", display_val(data["speed"]))
-    st.metric("Distance", display_val(data["distance"]))
+    st.markdown("### 📍 Target Data")
+    st.metric("X", show_val(st.session_state["data"].get("x")))
+    st.metric("Y", show_val(st.session_state["data"].get("y")))
+    st.metric("Speed", show_val(st.session_state["data"].get("speed")))
+    st.metric("Distance", show_val(st.session_state["data"].get("distance")))
 
 st.markdown("---")
-st.markdown("Developed by **Aditya Puri** 🚀")
+st.markdown("👨‍💻 Developed by **Aditya Puri** 🚀")
