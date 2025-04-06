@@ -2,65 +2,101 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import ssl
 import json
+import math
 import time
 from threading import Thread
-from collections import deque
 import plotly.graph_objects as go
 
-# MQTT Broker Configuration
+# ---------------- MQTT CONFIG ---------------- #
 BROKER = "chameleon.lmq.cloudamqp.com"
 PORT = 8883
 USERNAME = "xaygsnkk:xaygsnkk"
 PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC = "esp32/target"
 
-# Streamlit UI
-st.set_page_config(page_title="Target Tracker", layout="centered")
-st.title("🎯 Real-time Target Location")
+# ---------------- STREAMLIT CONFIG ---------------- #
+st.set_page_config(page_title="Live Target Tracker", layout="centered")
+st.title("🎯 Live Target Tracking")
 
-# Store latest points
-x_vals, y_vals = deque(maxlen=50), deque(maxlen=50)
+# ---------------- SHARED VARIABLES ---------------- #
+latest_data = {"x": 0, "y": 0, "speed": 0.0, "distance": 0.0}
+prev_data = {"x": 0, "y": 0, "timestamp": time.time()}
 
-# MQTT Callback
+# ---------------- MQTT CALLBACKS ---------------- #
+def on_connect(client, userdata, flags, rc):
+    client.subscribe(TOPIC)
+
 def on_message(client, userdata, msg):
+    global latest_data, prev_data
     try:
-        data = json.loads(msg.payload.decode())
-        x = data.get("x")
-        y = data.get("y")
+        payload = json.loads(msg.payload.decode())
+        x = float(payload.get("x", 0))
+        y = float(payload.get("y", 0))
 
-        if x is not None and y is not None:
-            x_vals.append(x)
-            y_vals.append(y)
+        now = time.time()
+        dx = x - prev_data["x"]
+        dy = y - prev_data["y"]
+        distance = math.sqrt(dx**2 + dy**2)
+        dt = now - prev_data["timestamp"]
+        speed = distance / dt if dt > 0 else 0.0
+
+        latest_data.update({
+            "x": x,
+            "y": y,
+            "distance": round(distance, 2),
+            "speed": round(speed, 2)
+        })
+
+        prev_data.update({
+            "x": x,
+            "y": y,
+            "timestamp": now
+        })
+
     except Exception as e:
-        print("MQTT Decode Error:", e)
+        st.error(f"Error in MQTT message: {e}")
 
-# MQTT Background Thread
-def mqtt_worker():
-    client = mqtt.Client(protocol=mqtt.MQTTv311)
+# ---------------- START MQTT THREAD ---------------- #
+def mqtt_thread():
+    client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
     client.tls_set(cert_reqs=ssl.CERT_NONE)
-    client.tls_insecure_set(True)
+    client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(BROKER, PORT, keepalive=60)
-    client.subscribe(TOPIC)
+    client.connect(BROKER, PORT, 60)
     client.loop_forever()
 
-Thread(target=mqtt_worker, daemon=True).start()
+Thread(target=mqtt_thread, daemon=True).start()
 
-# Realtime Plot
-plot_placeholder = st.empty()
+# ---------------- STREAMLIT DISPLAY LOOP ---------------- #
+placeholder = st.empty()
 
 while True:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=list(x_vals), y=list(y_vals),
-                             mode='markers+lines',
-                             marker=dict(size=10, color='red'),
-                             line=dict(color='gray')))
-    fig.update_layout(
-        xaxis_title="X Position",
-        yaxis_title="Y Position",
-        height=500,
-        template="plotly_dark"
-    )
-    plot_placeholder.plotly_chart(fig, use_container_width=True)
+    with placeholder.container():
+        st.subheader("📍 Target Location")
+        st.write(f"**X:** {latest_data['x']}  **Y:** {latest_data['y']}")
+        st.write(f"**Distance moved:** {latest_data['distance']} units")
+        st.write(f"**Speed:** {latest_data['speed']} units/sec")
+
+        # Plot single point
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=[latest_data["x"]],
+            y=[latest_data["y"]],
+            mode="markers",
+            marker=dict(color="red", size=15),
+            name="Live Target"
+        ))
+        fig.update_layout(
+            xaxis_title="X Position",
+            yaxis_title="Y Position",
+            xaxis=dict(range=[0, 100]),
+            yaxis=dict(range=[0, 100]),
+            plot_bgcolor="black",
+            paper_bgcolor="black",
+            font_color="white",
+            height=500
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
     time.sleep(0.5)
