@@ -14,8 +14,8 @@ st.title("📡 Real-Time Human Tracking")
 st.markdown("Live data from ESP32 via MQTT")
 
 # MQTT Setup
-BROKER = "chameleon.lmq.cloudamqp.com"
-PORT = 8883
+MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
+MQTT_PORT = 8883
 USERNAME = "xaygsnkk:xaygsnkk"
 PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC = "esp32/target"
