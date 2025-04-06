@@ -1,11 +1,17 @@
 import streamlit as st
 import paho.mqtt.client as mqtt
-import ssl
 import json
-import math
 import time
-from threading import Thread
 import plotly.graph_objects as go
+import math
+from collections import deque
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+st.set_page_config(page_title="Live Human Tracking", layout="wide")
+st.title("📡 Real-Time Human Tracking")
+st.markdown("Live data from ESP32 via MQTT")
 
 # MQTT Setup
 BROKER = "chameleon.lmq.cloudamqp.com"
@@ -14,89 +20,71 @@ USERNAME = "xaygsnkk:xaygsnkk"
 PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC = "esp32/target"
 
-st.set_page_config(page_title="Live Target Tracker", layout="centered")
-st.title("🎯 Live Target Tracking")
+# Variables to store real-time data
+x, y, speed, distance = 0, 0, 0, 0
+prev_x, prev_y = None, None
+prev_time = time.time()
 
-latest_data = {"x": 0, "y": 0, "speed": 0.0, "distance": 0.0}
-prev_data = {"x": 0, "y": 0, "timestamp": time.time()}
+# Store last N positions
+max_len = 50
+x_history = deque(maxlen=max_len)
+y_history = deque(maxlen=max_len)
+speed_history = deque(maxlen=max_len)
+distance_history = deque(maxlen=max_len)
 
-def on_connect(client, userdata, flags, rc):
-    client.subscribe(TOPIC)
-
+# Callback when a message is received
 def on_message(client, userdata, msg):
-    global latest_data, prev_data
+    global x, y, speed, distance, prev_x, prev_y, prev_time
+
     try:
         payload = json.loads(msg.payload.decode())
-        x = float(payload.get("x", 0))
-        y = float(payload.get("y", 0))
+        new_x = float(payload.get("x", 0))
+        new_y = float(payload.get("y", 0))
 
-        now = time.time()
-        dx = x - prev_data["x"]
-        dy = y - prev_data["y"]
-        distance = math.sqrt(dx**2 + dy**2)
-        dt = now - prev_data["timestamp"]
-        speed = distance / dt if dt > 0 else 0.0
+        # Calculate distance and speed
+        curr_time = time.time()
+        if prev_x is not None and prev_y is not None:
+            dx = new_x - prev_x
+            dy = new_y - prev_y
+            dt = curr_time - prev_time if curr_time - prev_time > 0 else 0.01
 
-        latest_data.update({
-            "x": x,
-            "y": y,
-            "distance": round(distance, 2),
-            "speed": round(speed, 2)
-        })
+            distance = math.sqrt(dx**2 + dy**2)
+            speed = distance / dt
+        else:
+            distance, speed = 0, 0
 
-        prev_data.update({
-            "x": x,
-            "y": y,
-            "timestamp": now
-        })
+        # Update history
+        x, y = new_x, new_y
+        x_history.append(x)
+        y_history.append(y)
+        speed_history.append(speed)
+        distance_history.append(distance)
+
+        prev_x, prev_y = new_x, new_y
+        prev_time = curr_time
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error parsing message: {e}")
 
-def mqtt_thread():
-    client = mqtt.Client()
-    client.username_pw_set(USERNAME, PASSWORD)
-    client.tls_set(cert_reqs=ssl.CERT_NONE)
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.connect(BROKER, PORT, 60)
-    client.loop_forever()
+# MQTT client setup
+client = mqtt.Client(protocol=mqtt.MQTTv311)
+client.on_message = on_message
+client.connect(MQTT_BROKER, MQTT_PORT, 60)
+client.subscribe(MQTT_TOPIC)
+client.loop_start()
 
-Thread(target=mqtt_thread, daemon=True).start()
-
-# Setup placeholders
-data_placeholder = st.empty()
-chart_placeholder = st.empty()
+# Streamlit chart loop
+plot_placeholder = st.empty()
+value_col1, value_col2, value_col3 = st.columns(3)
 
 while True:
-    # Display values
-    with data_placeholder.container():
-        st.subheader("📍 Target Coordinates & Movement")
-        st.metric("X", latest_data["x"])
-        st.metric("Y", latest_data["y"])
-        st.metric("Distance", f'{latest_data["distance"]} units')
-        st.metric("Speed", f'{latest_data["speed"]} units/sec')
+    fig = go.Figure()
 
-    # Display chart
-    with chart_placeholder.container():
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=[latest_data["x"]],
-            y=[latest_data["y"]],
-            mode="markers",
-            marker=dict(color="red", size=15),
-            name="Target"
-        ))
-        fig.update_layout(
-            xaxis_title="X Position",
-            yaxis_title="Y Position",
-            xaxis=dict(range=[0, 100]),
-            yaxis=dict(range=[0, 100]),
-            plot_bgcolor="black",
-            paper_bgcolor="black",
-            font_color="white",
-            height=500
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    time.sleep(0.5)
+    # Plot live trail
+    fig.add_trace(go.Scatter(
+        x=list(x_history),
+        y=list(y_history),
+        mode='lines+markers+text',
+        marker=dict(color='red', size=8),
+        line=dict(color='gray', width=2),
+        text=[f"({round(px,1)}, {round(py,1)})" for px, py in zip(x_history, y_history)],
