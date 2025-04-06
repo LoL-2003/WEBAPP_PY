@@ -1,81 +1,42 @@
 import streamlit as st
 import paho.mqtt.client as mqtt
-import ssl
+import queue
 import threading
-import json
-import time
-from datetime import datetime
 
-# MQTT Config
-MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
-MQTT_PORT = 8883
-MQTT_USERNAME = "xaygsnkk:xaygsnkk"
-MQTT_PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
-TOPIC_SUB = "esp32/target"
-
-# Initialize Streamlit session state
+# Step 1: Initialize state
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
 if "mqtt_messages" not in st.session_state:
-    st.session_state.mqtt_messages = []
+    st.session_state["mqtt_messages"] = []
 
-# Callback: on connect
+mqtt_queue = queue.Queue()
+
+# Step 2: Define MQTT callbacks
 def on_connect(client, userdata, flags, rc):
-    print("Connected with result code " + str(rc))
-    if rc == 0:
-        client.subscribe(TOPIC_SUB)
-    else:
-        print("Failed to connect, return code:", rc)
+    client.subscribe("esp32/target")
 
-# Callback: on message
 def on_message(client, userdata, msg):
-    try:
-        payload = msg.payload.decode()
-        data = json.loads(payload)
-        msg_dict = {
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "x": data.get("x"),
-            "y": data.get("y"),
-            "speed": data.get("speed"),
-            "distance": data.get("distance")
-        }
-        st.session_state.mqtt_messages.append(msg_dict)
-        print("Message received:", msg_dict)
-    except Exception as e:
-        print("Error:", e)
+    message = msg.payload.decode()
+    mqtt_queue.put(message)  # Use queue instead of session_state
 
-# Thread function
+# Step 3: Start MQTT in background
 def mqtt_thread():
     client = mqtt.Client()
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-    client.tls_insecure_set(False)
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.connect("broker.hivemq.com", 1883, 60)
     client.loop_forever()
 
-# Start MQTT client only once
-if "mqtt_thread_started" not in st.session_state:
-    threading.Thread(target=mqtt_thread, daemon=True).start()
-    st.session_state.mqtt_thread_started = True
+threading.Thread(target=mqtt_thread, daemon=True).start()
 
-# Streamlit UI
-st.title("📡 ESP32 MQTT Data Dashboard")
-st.subheader("📬 Received Data")
+# Step 4: Streamlit UI
+st.title("MQTT Dashboard")
 
-output = st.empty()
+# Poll queue safely and update session state
+while not mqtt_queue.empty():
+    message = mqtt_queue.get()
+    st.session_state["mqtt_messages"].append(message)
 
-# Live refresh
-while True:
-    with output.container():
-        if st.session_state.mqtt_messages:
-            for msg in reversed(st.session_state.mqtt_messages[-10:]):
-                st.markdown(f"""
-                    - ⏱️ **Time**: {msg['time']}
-                    - 📍 **X**: {msg['x']}, **Y**: {msg['y']}
-                    - 🚀 **Speed**: {msg['speed']}
-                    - 📏 **Distance**: {msg['distance']}
-                    ---
-                """)
-        else:
-            st.info("Waiting for MQTT messages...")
-    time.sleep(1)
+# Display messages
+st.write("Received Messages:")
+st.write(st.session_state["mqtt_messages"])
