@@ -1,48 +1,49 @@
 import streamlit as st
 import paho.mqtt.client as mqtt
 import ssl
+import threading
 import json
 import time
 from datetime import datetime
 
-# MQTT Broker settings
+# MQTT Config
 MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
 MQTT_PORT = 8883
 MQTT_USERNAME = "xaygsnkk:xaygsnkk"
 MQTT_PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC_SUB = "esp32/target"
 
-# Shared message store
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# Initialize Streamlit session state
+if "mqtt_messages" not in st.session_state:
+    st.session_state.mqtt_messages = []
 
-# MQTT callbacks
+# Callback: on connect
 def on_connect(client, userdata, flags, rc):
+    print("Connected with result code " + str(rc))
     if rc == 0:
         client.subscribe(TOPIC_SUB)
     else:
-        st.error(f"Failed to connect: Code {rc}")
+        print("Failed to connect, return code:", rc)
 
+# Callback: on message
 def on_message(client, userdata, msg):
     try:
-        data = json.loads(msg.payload.decode())
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        message = {
-            "timestamp": timestamp,
-            "x": data.get("x", "N/A"),
-            "y": data.get("y", "N/A"),
-            "speed": data.get("speed", "N/A"),
-            "distance": data.get("distance", "N/A")
+        payload = msg.payload.decode()
+        data = json.loads(payload)
+        msg_dict = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "x": data.get("x"),
+            "y": data.get("y"),
+            "speed": data.get("speed"),
+            "distance": data.get("distance")
         }
-        st.session_state.messages.append(message)
-        if len(st.session_state.messages) > 10:
-            st.session_state.messages.pop(0)
+        st.session_state.mqtt_messages.append(msg_dict)
+        print("Message received:", msg_dict)
     except Exception as e:
-        print("Error parsing message:", e)
+        print("Error:", e)
 
-# Initialize MQTT once
-@st.cache_resource
-def init_mqtt():
+# Thread function
+def mqtt_thread():
     client = mqtt.Client()
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
@@ -50,28 +51,31 @@ def init_mqtt():
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.loop_start()
-    return client
+    client.loop_forever()
 
-# Start MQTT client
-init_mqtt()
+# Start MQTT client only once
+if "mqtt_thread_started" not in st.session_state:
+    threading.Thread(target=mqtt_thread, daemon=True).start()
+    st.session_state.mqtt_thread_started = True
 
 # Streamlit UI
 st.title("📡 ESP32 MQTT Data Dashboard")
 st.subheader("📬 Received Data")
 
-container = st.empty()
+output = st.empty()
 
-# Live update loop
-for _ in range(200):  # Refresh ~200 times (~20s)
-    with container.container():
-        if st.session_state.messages:
-            for msg in reversed(st.session_state.messages):
-                with st.expander(f"Message at {msg['timestamp']}"):
-                    st.write(f"**X**: {msg['x']}")
-                    st.write(f"**Y**: {msg['y']}")
-                    st.write(f"**Speed**: {msg['speed']}")
-                    st.write(f"**Distance**: {msg['distance']}")
+# Live refresh
+while True:
+    with output.container():
+        if st.session_state.mqtt_messages:
+            for msg in reversed(st.session_state.mqtt_messages[-10:]):
+                st.markdown(f"""
+                    - ⏱️ **Time**: {msg['time']}
+                    - 📍 **X**: {msg['x']}, **Y**: {msg['y']}
+                    - 🚀 **Speed**: {msg['speed']}
+                    - 📏 **Distance**: {msg['distance']}
+                    ---
+                """)
         else:
             st.info("Waiting for MQTT messages...")
-    time.sleep(0.1)
+    time.sleep(1)
