@@ -3,36 +3,27 @@ import paho.mqtt.client as mqtt
 import ssl
 import json
 from datetime import datetime
-import threading
-import time
 
-# CloudAMQP credentials
+# MQTT Broker settings
 MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
 MQTT_PORT = 8883
 MQTT_USERNAME = "xaygsnkk:xaygsnkk"
 MQTT_PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
-
-# MQTT topic
 TOPIC_SUB = "esp32/target"
 
 # Global variables
 client = None
 received_messages = []
-lock = threading.Lock()
-running = True
 
-# Callback functions
+# MQTT callbacks
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        st.session_state.status = "✅ Connected to MQTT Broker"
         client.subscribe(TOPIC_SUB)
-        st.write(f"Subscribed to topic: {TOPIC_SUB}")
     else:
-        st.session_state.status = f"❌ Failed to connect, return code {rc}"
+        st.error(f"Failed to connect: Code {rc}")
 
 def on_message(client, userdata, msg):
     try:
-        st.write(f"Message received on topic: {msg.topic} - Payload: {msg.payload.decode()}")  # Debug output
         data = json.loads(msg.payload.decode())
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = {
@@ -42,21 +33,14 @@ def on_message(client, userdata, msg):
             "speed": data.get("speed", "N/A"),
             "distance": data.get("distance", "N/A")
         }
-        with lock:
-            received_messages.append(message)
-            if len(received_messages) > 10:
-                received_messages.pop(0)
-        st.session_state.messages = received_messages.copy()  # Update session state
+        received_messages.append(message)
+        if len(received_messages) > 10:
+            received_messages.pop(0)
+        st.session_state.messages = received_messages.copy()
     except Exception as e:
-        st.session_state.error = f"⚠️ Error decoding message: {str(e)}"
-        st.write(f"Raw payload causing error: {msg.payload.decode()}")
+        st.error(f"Error parsing message: {str(e)}")
 
-# MQTT loop in a separate thread
-def mqtt_loop():
-    while running:
-        client.loop(timeout=1.0)
-
-# Initialize MQTT client
+# MQTT client initialization
 def init_mqtt():
     global client
     client = mqtt.Client()
@@ -65,60 +49,29 @@ def init_mqtt():
     client.tls_insecure_set(False)
     client.on_connect = on_connect
     client.on_message = on_message
-    
-    try:
-        client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        st.session_state.status = "⏳ Connecting..."
-        threading.Thread(target=mqtt_loop, daemon=True).start()
-    except Exception as e:
-        st.session_state.status = f"❌ Connection failed: {str(e)}"
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.loop_start()  # No need for manual thread
 
 # Streamlit UI
 def main():
-    # Initialize session state
-    if "status" not in st.session_state:
-        st.session_state.status = "⏳ Connecting..."
-    if "error" not in st.session_state:
-        st.session_state.error = ""
+    st.title("📡 ESP32 MQTT Data Dashboard")
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Initialize MQTT if not already done
     if client is None:
         init_mqtt()
 
-    st.title("ESP32 MQTT Data Dashboard")
-
-    # Status display
-    st.subheader("Connection Status")
-    st.write(st.session_state.status)
-
-    # Received messages display
-    st.subheader("Received Data")
+    st.subheader("📬 Received Data")
     if st.session_state.messages:
         for msg in reversed(st.session_state.messages):
             with st.expander(f"Message at {msg['timestamp']}"):
-                st.write(f"X: {msg['x']}")
-                st.write(f"Y: {msg['y']}")
-                st.write(f"Speed: {msg['speed']}")
-                st.write(f"Distance: {msg['distance']}")
+                st.write(f"**X**: {msg['x']}")
+                st.write(f"**Y**: {msg['y']}")
+                st.write(f"**Speed**: {msg['speed']}")
+                st.write(f"**Distance**: {msg['distance']}")
     else:
-        st.write("No messages received yet...")
-
-    # Error display
-    if st.session_state.error:
-        st.error(st.session_state.error)
-
-# Cleanup on app close
-def cleanup():
-    global running, client
-    running = False
-    if client is not None:
-        client.loop_stop()
-        client.disconnect()
-
-import atexit
-atexit.register(cleanup)
+        st.info("Waiting for MQTT messages...")
 
 if __name__ == "__main__":
     main()
