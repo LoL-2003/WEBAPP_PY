@@ -12,9 +12,8 @@ MQTT_PORT = 8883
 MQTT_USERNAME = "xaygsnkk:xaygsnkk"
 MQTT_PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 
-# MQTT topics
+# MQTT topic
 TOPIC_SUB = "esp32/target"
-TOPIC_PUB = "esp32/control"
 
 # Global variables
 client = None
@@ -33,6 +32,7 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     try:
+        st.write(f"Message received on topic: {msg.topic} - Payload: {msg.payload.decode()}")  # Debug output
         data = json.loads(msg.payload.decode())
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = {
@@ -49,6 +49,7 @@ def on_message(client, userdata, msg):
         st.session_state.messages = received_messages.copy()  # Update session state
     except Exception as e:
         st.session_state.error = f"⚠️ Error decoding message: {str(e)}"
+        st.write(f"Raw payload causing error: {msg.payload.decode()}")
 
 # MQTT loop in a separate thread
 def mqtt_loop():
@@ -86,23 +87,11 @@ def main():
     if client is None:
         init_mqtt()
 
-    st.title("ESP32 MQTT Control Dashboard")
+    st.title("ESP32 MQTT Data Dashboard")
 
     # Status display
     st.subheader("Connection Status")
     st.write(st.session_state.status)
-
-    # Control buttons
-    st.subheader("LED Control")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Turn ON"):
-            client.publish(TOPIC_PUB, "ON")
-            st.success("✅ Command 'ON' sent to ESP32")
-    with col2:
-        if st.button("Turn OFF"):
-            client.publish(TOPIC_PUB, "OFF")
-            st.success("✅ Command 'OFF' sent to ESP32")
 
     # Received messages display
     st.subheader("Received Data")
