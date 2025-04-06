@@ -7,22 +7,19 @@ import time
 from threading import Thread
 import plotly.graph_objects as go
 
-# ---------------- MQTT CONFIG ---------------- #
+# MQTT Setup
 BROKER = "chameleon.lmq.cloudamqp.com"
 PORT = 8883
 USERNAME = "xaygsnkk:xaygsnkk"
 PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC = "esp32/target"
 
-# ---------------- STREAMLIT CONFIG ---------------- #
 st.set_page_config(page_title="Live Target Tracker", layout="centered")
 st.title("🎯 Live Target Tracking")
 
-# ---------------- SHARED VARIABLES ---------------- #
 latest_data = {"x": 0, "y": 0, "speed": 0.0, "distance": 0.0}
 prev_data = {"x": 0, "y": 0, "timestamp": time.time()}
 
-# ---------------- MQTT CALLBACKS ---------------- #
 def on_connect(client, userdata, flags, rc):
     client.subscribe(TOPIC)
 
@@ -54,9 +51,8 @@ def on_message(client, userdata, msg):
         })
 
     except Exception as e:
-        st.error(f"Error in MQTT message: {e}")
+        st.error(f"Error: {e}")
 
-# ---------------- START MQTT THREAD ---------------- #
 def mqtt_thread():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
@@ -68,24 +64,28 @@ def mqtt_thread():
 
 Thread(target=mqtt_thread, daemon=True).start()
 
-# ---------------- STREAMLIT DISPLAY LOOP ---------------- #
-placeholder = st.empty()
+# Setup placeholders
+data_placeholder = st.empty()
+chart_placeholder = st.empty()
 
 while True:
-    with placeholder.container():
-        st.subheader("📍 Target Location")
-        st.write(f"**X:** {latest_data['x']}  **Y:** {latest_data['y']}")
-        st.write(f"**Distance moved:** {latest_data['distance']} units")
-        st.write(f"**Speed:** {latest_data['speed']} units/sec")
+    # Display values
+    with data_placeholder.container():
+        st.subheader("📍 Target Coordinates & Movement")
+        st.metric("X", latest_data["x"])
+        st.metric("Y", latest_data["y"])
+        st.metric("Distance", f'{latest_data["distance"]} units')
+        st.metric("Speed", f'{latest_data["speed"]} units/sec')
 
-        # Plot single point
+    # Display chart
+    with chart_placeholder.container():
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=[latest_data["x"]],
             y=[latest_data["y"]],
             mode="markers",
             marker=dict(color="red", size=15),
-            name="Live Target"
+            name="Target"
         ))
         fig.update_layout(
             xaxis_title="X Position",
