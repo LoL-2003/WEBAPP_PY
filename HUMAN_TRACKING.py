@@ -20,6 +20,7 @@ TOPIC_PUB = "esp32/control"
 client = None
 received_messages = []
 lock = threading.Lock()
+running = True
 
 # Callback functions
 def on_connect(client, userdata, flags, rc):
@@ -27,14 +28,17 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         st.session_state.status = "✅ Connected to MQTT Broker"
         client.subscribe(TOPIC_SUB)
-        st.write("Subscribed to topic:", TOPIC_SUB)
+        st.write(f"Subscribed to topic: {TOPIC_SUB}")
+        # Test subscription by publishing a test message
+        client.publish(TOPIC_SUB, json.dumps({"test": "subscription_check"}))
     else:
         st.session_state.status = f"❌ Failed to connect, return code {rc}"
+        st.write(f"Connection failed with code: {rc}")
 
 def on_message(client, userdata, msg):
     global received_messages
     try:
-        st.write(f"Message received on topic: {msg.topic}")  # Debug output
+        st.write(f"Message received on topic: {msg.topic} - Payload: {msg.payload.decode()}")  # Debug output
         data = json.loads(msg.payload.decode())
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = {
@@ -51,6 +55,12 @@ def on_message(client, userdata, msg):
         st.session_state.messages = received_messages.copy()  # Force UI update
     except Exception as e:
         st.session_state.error = f"⚠️ Error decoding message: {str(e)}"
+        st.write(f"Raw payload causing error: {msg.payload.decode()}")
+
+# MQTT loop in a separate thread
+def mqtt_loop():
+    while running:
+        client.loop(timeout=1.0)
 
 # Initialize MQTT client
 def init_mqtt():
@@ -65,9 +75,9 @@ def init_mqtt():
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         st.write("Attempting to connect to MQTT broker...")
+        threading.Thread(target=mqtt_loop, daemon=True).start()
     except Exception as e:
         st.session_state.status = f"❌ Connection failed: {str(e)}"
-    client.loop_start()
 
 # Streamlit UI
 def main():
@@ -120,6 +130,8 @@ def main():
 
 # Cleanup on app close
 def cleanup():
+    global running
+    running = False
     if client is not None:
         client.loop_stop()
         client.disconnect()
