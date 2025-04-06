@@ -24,21 +24,15 @@ running = True
 
 # Callback functions
 def on_connect(client, userdata, flags, rc):
-    global received_messages
     if rc == 0:
         st.session_state.status = "✅ Connected to MQTT Broker"
         client.subscribe(TOPIC_SUB)
         st.write(f"Subscribed to topic: {TOPIC_SUB}")
-        # Test subscription by publishing a test message
-        client.publish(TOPIC_SUB, json.dumps({"test": "subscription_check"}))
     else:
         st.session_state.status = f"❌ Failed to connect, return code {rc}"
-        st.write(f"Connection failed with code: {rc}")
 
 def on_message(client, userdata, msg):
-    global received_messages
     try:
-        st.write(f"Message received on topic: {msg.topic} - Payload: {msg.payload.decode()}")  # Debug output
         data = json.loads(msg.payload.decode())
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = {
@@ -52,10 +46,9 @@ def on_message(client, userdata, msg):
             received_messages.append(message)
             if len(received_messages) > 10:
                 received_messages.pop(0)
-        st.session_state.messages = received_messages.copy()  # Force UI update
+        st.session_state.messages = received_messages.copy()  # Update session state
     except Exception as e:
         st.session_state.error = f"⚠️ Error decoding message: {str(e)}"
-        st.write(f"Raw payload causing error: {msg.payload.decode()}")
 
 # MQTT loop in a separate thread
 def mqtt_loop():
@@ -74,15 +67,13 @@ def init_mqtt():
     
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        st.write("Attempting to connect to MQTT broker...")
+        st.session_state.status = "⏳ Connecting..."
         threading.Thread(target=mqtt_loop, daemon=True).start()
     except Exception as e:
         st.session_state.status = f"❌ Connection failed: {str(e)}"
 
 # Streamlit UI
 def main():
-    st.title("ESP32 MQTT Control Dashboard")
-
     # Initialize session state
     if "status" not in st.session_state:
         st.session_state.status = "⏳ Connecting..."
@@ -94,6 +85,8 @@ def main():
     # Initialize MQTT if not already done
     if client is None:
         init_mqtt()
+
+    st.title("ESP32 MQTT Control Dashboard")
 
     # Status display
     st.subheader("Connection Status")
@@ -113,7 +106,6 @@ def main():
 
     # Received messages display
     st.subheader("Received Data")
-    messages_placeholder = st.empty()
     if st.session_state.messages:
         for msg in reversed(st.session_state.messages):
             with st.expander(f"Message at {msg['timestamp']}"):
@@ -122,7 +114,7 @@ def main():
                 st.write(f"Speed: {msg['speed']}")
                 st.write(f"Distance: {msg['distance']}")
     else:
-        messages_placeholder.write("No messages received yet...")
+        st.write("No messages received yet...")
 
     # Error display
     if st.session_state.error:
@@ -130,7 +122,7 @@ def main():
 
 # Cleanup on app close
 def cleanup():
-    global running
+    global running, client
     running = False
     if client is not None:
         client.loop_stop()
