@@ -56,8 +56,8 @@ client.loop_start()
 col1, col2, col3, col4 = st.columns(4)
 x_placeholder = col1.metric("X", "0.00")
 y_placeholder = col2.metric("Y", "0.00")
-speed_placeholder = col3.metric("Speed", "0.00 units/s")
-distance_placeholder = col4.metric("Distance", "0.00 units")
+speed_placeholder = col3.metric("Speed", "0.00 mm/s")
+distance_placeholder = col4.metric("Distance", "0.00 mm")
 
 # Live update loop
 while True:
