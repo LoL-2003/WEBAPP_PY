@@ -9,101 +9,48 @@ BROKER = "chameleon.lmq.cloudamqp.com"
 PORT = 8883
 USERNAME = "xaygsnkk:xaygsnkk"
 PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
+TOPIC_SUB = "esp32/target"
 
-CONTROL_TOPIC = "esp32/control"
-STATUS_TOPIC = "esp32/status"
-TARGET_TOPIC = "esp32/target"
+# Initialize session state
+if "mqtt_data" not in st.session_state:
+    st.session_state.mqtt_data = {"x": "...", "y": "...", "speed": "...", "distance": "..."}
 
-# Initialize state
-if "status" not in st.session_state:
-    st.session_state["status"] = "Connecting..."
-if "data" not in st.session_state:
-    st.session_state["data"] = {"x": None, "y": None, "speed": None, "distance": None}
-if "update_flag" not in st.session_state:
-    st.session_state["update_flag"] = False
-
-# MQTT Callbacks
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("✅ MQTT Connected")
-        client.subscribe(STATUS_TOPIC)
-        client.subscribe(TARGET_TOPIC)
-    else:
-        print(f"❌ MQTT connection failed: {rc}")
-
+# Callback when message is received
 def on_message(client, userdata, msg):
-    payload = msg.payload.decode()
-    if msg.topic == STATUS_TOPIC:
-        st.session_state["status"] = payload
-    elif msg.topic == TARGET_TOPIC:
-        try:
-            json_data = json.loads(payload)
-            st.session_state["data"].update(json_data)
-            st.session_state["update_flag"] = True  # Trigger rerun
-        except Exception as e:
-            print("⚠️ Error decoding target data:", e)
+    try:
+        data = json.loads(msg.payload.decode())
+        st.session_state.mqtt_data = {
+            "x": data.get("x", "..."),
+            "y": data.get("y", "..."),
+            "speed": data.get("speed", "..."),
+            "distance": data.get("distance", "...")
+        }
+        st.experimental_rerun()
+    except Exception as e:
+        print("Error decoding message:", e)
 
-# MQTT thread
-def start_mqtt():
+# MQTT background thread
+def mqtt_thread():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
     client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
     client.tls_insecure_set(False)
-    client.on_connect = on_connect
+    client.on_connect = lambda client, userdata, flags, rc: client.subscribe(TOPIC_SUB)
     client.on_message = on_message
     client.connect(BROKER, PORT)
     client.loop_forever()
 
+# Start thread once
 if "mqtt_thread_started" not in st.session_state:
-    threading.Thread(target=start_mqtt, daemon=True).start()
-    st.session_state["mqtt_thread_started"] = True
+    threading.Thread(target=mqtt_thread, daemon=True).start()
+    st.session_state.mqtt_thread_started = True
 
-# Force rerun if data changed
-if st.session_state.get("update_flag"):
-    st.session_state["update_flag"] = False
-    st.experimental_rerun()
-
-# UI
-st.set_page_config(page_title="ESP32 Control Panel", page_icon="📟", layout="centered")
-st.title("📟 ESP32 Control Panel")
-
-col1, col2 = st.columns(2)
-
-# LED & Control
-with col1:
-    st.markdown("### 🔘 Device Control")
-    st.markdown(f"**Status:** `{st.session_state['status']}`")
-
-    led_icon = "🟢" if st.session_state["status"].upper() == "ON" else "🔴"
-    st.markdown(f"<h1 style='text-align: center;'>{led_icon}</h1>", unsafe_allow_html=True)
-
-    if st.button("Turn ON"):
-        pub = mqtt.Client()
-        pub.username_pw_set(USERNAME, PASSWORD)
-        pub.tls_set()
-        pub.connect(BROKER, PORT)
-        pub.publish(CONTROL_TOPIC, "ON")
-        st.success("Turn ON command sent")
-
-    if st.button("Turn OFF"):
-        pub = mqtt.Client()
-        pub.username_pw_set(USERNAME, PASSWORD)
-        pub.tls_set()
-        pub.connect(BROKER, PORT)
-        pub.publish(CONTROL_TOPIC, "OFF")
-        st.success("Turn OFF command sent")
-
-# Helper
-def show(val):
-    return val if val is not None else "..."
-
-# Sensor Data
-with col2:
-    st.markdown("### 📍 Sensor Data")
-    st.metric("X", show(st.session_state["data"].get("x")))
-    st.metric("Y", show(st.session_state["data"].get("y")))
-    st.metric("Speed", show(st.session_state["data"].get("speed")))
-    st.metric("Distance", show(st.session_state["data"].get("distance")))
+# Streamlit UI
+st.title("📡 Sensor Data Dashboard")
+st.metric("X", st.session_state.mqtt_data["x"])
+st.metric("Y", st.session_state.mqtt_data["y"])
+st.metric("Speed", st.session_state.mqtt_data["speed"])
+st.metric("Distance", st.session_state.mqtt_data["distance"])
 
 st.markdown("---")
 st.markdown("👨‍💻 Developed by **Aditya Puri** 🚀")
