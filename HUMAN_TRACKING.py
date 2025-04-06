@@ -80,7 +80,6 @@ value_col1, value_col2, value_col3 = st.columns(3)
 while True:
     fig = go.Figure()
 
-    # Plot live trail
     fig.add_trace(go.Scatter(
         x=list(x_history),
         y=list(y_history),
@@ -88,3 +87,7 @@ while True:
         marker=dict(color='red', size=8),
         line=dict(color='gray', width=2),
         text=[f"({round(px,1)}, {round(py,1)})" for px, py in zip(x_history, y_history)],
+        textposition="top center",
+        name="Path"
+    ))
+
