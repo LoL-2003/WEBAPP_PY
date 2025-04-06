@@ -1,42 +1,54 @@
-import streamlit as st
 import paho.mqtt.client as mqtt
-import queue
-import threading
+import ssl
+import json
+import time
 
-# Step 1: Initialize state
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
-if "mqtt_messages" not in st.session_state:
-    st.session_state["mqtt_messages"] = []
+# HiveMQ Cloud Credentials (same as ESP32)
+BROKER = "chameleon.lmq.cloudamqp.com"
+PORT = 8883  # TLS port
+USERNAME = "xaygsnkk:xaygsnkk"
+PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
+TOPIC = "esp32/target"
 
-mqtt_queue = queue.Queue()
-
-# Step 2: Define MQTT callbacks
+# Callback when connected to MQTT broker
 def on_connect(client, userdata, flags, rc):
-    client.subscribe("esp32/target")
+    if rc == 0:
+        print("✅ Connected to MQTT Broker securely!")
+        client.subscribe(TOPIC)
+    else:
+        print(f"❌ Failed to connect, return code {rc}")
 
+# Callback when a message is received
 def on_message(client, userdata, msg):
-    message = msg.payload.decode()
-    mqtt_queue.put(message)  # Use queue instead of session_state
+    try:
+        payload = msg.payload.decode()
+        data = json.loads(payload)
+        x = data.get("x")
+        y = data.get("y")
+        speed = data.get("speed")
+        distance = data.get("distance")
+        print(f"📍 Target => X: {x}, Y: {y}, Speed: {speed}, Distance: {distance}")
+    except Exception as e:
+        print(f"⚠️ Error decoding message: {e}")
 
-# Step 3: Start MQTT in background
-def mqtt_thread():
-    client = mqtt.Client()
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.connect("broker.hivemq.com", 1883, 60)
-    client.loop_forever()
+# MQTT Client Setup (v3.1.1 to avoid deprecation)
+client = mqtt.Client(protocol=mqtt.MQTTv311)
+client.username_pw_set(USERNAME, PASSWORD)
+client.on_connect = on_connect
+client.on_message = on_message
 
-threading.Thread(target=mqtt_thread, daemon=True).start()
+# Configure TLS (secure, but no certificate verification)
+client.tls_set(cert_reqs=ssl.CERT_NONE)
+client.tls_insecure_set(True)
 
-# Step 4: Streamlit UI
-st.title("MQTT Dashboard")
+# Connect and loop
+client.connect(BROKER, PORT, keepalive=60)
+client.loop_start()
 
-# Poll queue safely and update session state
-while not mqtt_queue.empty():
-    message = mqtt_queue.get()
-    st.session_state["mqtt_messages"].append(message)
-
-# Display messages
-st.write("Received Messages:")
-st.write(st.session_state["mqtt_messages"])
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("👋 Exiting...")
+    client.loop_stop()
+    client.disconnect()
