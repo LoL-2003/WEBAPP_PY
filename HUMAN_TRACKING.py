@@ -3,6 +3,8 @@ import paho.mqtt.client as mqtt
 import ssl
 import json
 from datetime import datetime
+import threading
+import time
 
 # CloudAMQP credentials
 MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
@@ -17,6 +19,7 @@ TOPIC_PUB = "esp32/control"
 # Global variables
 client = None
 received_messages = []
+lock = threading.Lock()  # To safely update received_messages
 
 # Callback functions
 def on_connect(client, userdata, flags, rc):
@@ -27,6 +30,7 @@ def on_connect(client, userdata, flags, rc):
         st.session_state.status = f"❌ Failed to connect, return code {rc}"
 
 def on_message(client, userdata, msg):
+    global received_messages
     try:
         data = json.loads(msg.payload.decode())
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -37,10 +41,10 @@ def on_message(client, userdata, msg):
             "speed": data.get("speed", "N/A"),
             "distance": data.get("distance", "N/A")
         }
-        received_messages.append(message)
-        # Keep only last 10 messages
-        if len(received_messages) > 10:
-            received_messages.pop(0)
+        with lock:
+            received_messages.append(message)
+            if len(received_messages) > 10:
+                received_messages.pop(0)
     except Exception as e:
         st.session_state.error = f"⚠️ Error decoding message: {str(e)}"
 
@@ -60,6 +64,13 @@ def init_mqtt():
     except Exception as e:
         st.session_state.status = f"❌ Connection failed: {str(e)}"
 
+# Background task to keep Streamlit updated
+def update_ui():
+    while True:
+        with lock:
+            st.session_state.messages = received_messages.copy()
+        time.sleep(1)  # Update every second
+
 # Streamlit UI
 def main():
     st.title("ESP32 MQTT Control Dashboard")
@@ -69,10 +80,13 @@ def main():
         st.session_state.status = "⏳ Connecting..."
     if "error" not in st.session_state:
         st.session_state.error = ""
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
     # Initialize MQTT if not already done
     if client is None:
         init_mqtt()
+        threading.Thread(target=update_ui, daemon=True).start()
 
     # Status display
     st.subheader("Connection Status")
@@ -92,8 +106,8 @@ def main():
 
     # Received messages display
     st.subheader("Received Data")
-    if received_messages:
-        for msg in reversed(received_messages):
+    if st.session_state.messages:
+        for msg in reversed(st.session_state.messages):
             with st.expander(f"Message at {msg['timestamp']}"):
                 st.write(f"X: {msg['x']}")
                 st.write(f"Y: {msg['y']}")
@@ -106,12 +120,6 @@ def main():
     if st.session_state.error:
         st.error(st.session_state.error)
 
-    # Auto-refresh
-    st.button("Refresh")  # Manual refresh option
-
-if __name__ == "__main__":
-    main()
-
 # Cleanup on app close
 def cleanup():
     if client is not None:
@@ -120,3 +128,6 @@ def cleanup():
 
 import atexit
 atexit.register(cleanup)
+
+if __name__ == "__main__":
+    main()
