@@ -14,12 +14,13 @@ CONTROL_TOPIC = "esp32/control"
 STATUS_TOPIC = "esp32/status"
 TARGET_TOPIC = "esp32/target"
 
-# Initialize session state
+# Initialize state
 if "status" not in st.session_state:
     st.session_state["status"] = "Connecting..."
-
 if "data" not in st.session_state:
     st.session_state["data"] = {"x": None, "y": None, "speed": None, "distance": None}
+if "update_flag" not in st.session_state:
+    st.session_state["update_flag"] = False
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc):
@@ -38,10 +39,11 @@ def on_message(client, userdata, msg):
         try:
             json_data = json.loads(payload)
             st.session_state["data"].update(json_data)
+            st.session_state["update_flag"] = True  # Trigger rerun
         except Exception as e:
             print("⚠️ Error decoding target data:", e)
 
-# Start MQTT client thread
+# MQTT thread
 def start_mqtt():
     client = mqtt.Client()
     client.username_pw_set(USERNAME, PASSWORD)
@@ -49,24 +51,29 @@ def start_mqtt():
     client.tls_insecure_set(False)
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(BROKER, PORT, keepalive=60)
+    client.connect(BROKER, PORT)
     client.loop_forever()
 
 if "mqtt_thread_started" not in st.session_state:
     threading.Thread(target=start_mqtt, daemon=True).start()
     st.session_state["mqtt_thread_started"] = True
 
-# Streamlit UI
+# Force rerun if data changed
+if st.session_state.get("update_flag"):
+    st.session_state["update_flag"] = False
+    st.experimental_rerun()
+
+# UI
 st.set_page_config(page_title="ESP32 Control Panel", page_icon="📟", layout="centered")
 st.title("📟 ESP32 Control Panel")
 
 col1, col2 = st.columns(2)
 
-# Status + Controls
+# LED & Control
 with col1:
     st.markdown("### 🔘 Device Control")
     st.markdown(f"**Status:** `{st.session_state['status']}`")
-    
+
     led_icon = "🟢" if st.session_state["status"].upper() == "ON" else "🔴"
     st.markdown(f"<h1 style='text-align: center;'>{led_icon}</h1>", unsafe_allow_html=True)
 
@@ -86,10 +93,11 @@ with col1:
         pub.publish(CONTROL_TOPIC, "OFF")
         st.success("Turn OFF command sent")
 
-# Live Sensor Data
+# Helper
 def show(val):
     return val if val is not None else "..."
 
+# Sensor Data
 with col2:
     st.markdown("### 📍 Sensor Data")
     st.metric("X", show(st.session_state["data"].get("x")))
