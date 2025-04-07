@@ -8,12 +8,18 @@ st.set_page_config(page_title="Real-Time Human Tracking", layout="centered")
 st.title("📡 Real-Time Human Tracking")
 st.markdown("Live data from ESP32 via MQTT")
 
-# MQTT Credentials
-MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
-MQTT_PORT = 8883
-USERNAME = "xaygsnkk:xaygsnkk"
-PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
+# # MQTT Credentials
+# MQTT_BROKER = "chameleon.lmq.cloudamqp.com"
+# MQTT_PORT = 8883
+# USERNAME = "xaygsnkk:xaygsnkk"
+# PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC = "esp32/target"
+
+// MQTT Broker settings (Cloud)
+const char* mqtt_server = "fuji.lmq.cloudamqp.com";
+const int mqtt_port = 8883;
+const char* mqtt_username = "qthbfpde:qthbfpde"; // username
+const char* mqtt_password = "Ct9dJehfPVqpIS6m0ZjDgVOgG-3EunYP";     // password
 
 # Initialize values
 x, y, speed, distance = 0.0, 0.0, 0.0, 0.0
