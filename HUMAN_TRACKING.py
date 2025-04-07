@@ -15,7 +15,7 @@ st.markdown("Live data from ESP32 via MQTT")
 # PASSWORD = "mOLBh4PE5GW_Vd7I4TMQ-eMc02SvIrbS"
 TOPIC = "esp32/target"
 
-// MQTT Broker settings (Cloud)
+#MQTT Broker settings (Cloud)
 const char* mqtt_server = "fuji.lmq.cloudamqp.com";
 const int mqtt_port = 8883;
 const char* mqtt_username = "qthbfpde:qthbfpde"; // username
