@@ -302,11 +302,13 @@ import time
 import logging
 from datetime import datetime
 import os
+import socket
+import errno
 
 # Streamlit page configuration
 st.set_page_config(page_title="Real-Time Human Tracking", layout="wide")
 st.title("📡 Real-Time Human Tracking")
-st.markdown("Live_ELEMENT FROM ChirpStack MQTT")
+st.markdown("Live data from ChirpStack MQTT")
 
 # MQTT Broker Configuration
 MQTT_SERVER_IP = "test.chirpstack.vandyam.com"
@@ -416,13 +418,44 @@ def on_message(client, userdata, msg):
         st.error(f"Error processing message: {e}")
         logging.error(f"Error processing message: {e}")
 
+# Function to connect with retries
+def connect_mqtt(client, max_retries=5, delay=5):
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            client.connect(MQTT_SERVER_IP, MQTT_PORT, 60)
+            return True
+        except socket.gaierror as e:
+            st.error(f"DNS resolution failed for {MQTT_SERVER_IP}: {e}")
+            logging.error(f"DNS resolution failed: {e}")
+        except socket.timeout as e:
+            st.error(f"Connection timed out to {MQTT_SERVER_IP}:{MQTT_PORT}: {e}")
+            logging.error(f"Connection timeout: {e}")
+        except socket.error as e:
+            if e.errno == errno.ECONNREFUSED:
+                st.error(f"Connection refused by {MQTT_SERVER_IP}:{MQTT_PORT}: {e}")
+                logging.error(f"Connection refused: {e}")
+            else:
+                st.error(f"Socket error connecting to {MQTT_SERVER_IP}:{MQTT_PORT}: {e}")
+                logging.error(f"Socket error: {e}")
+        attempt += 1
+        if attempt < max_retries:
+            st.warning(f"Retry {attempt + 1}/{max_retries} in {delay} seconds...")
+            logging.info(f"Retry {attempt + 1}/{max_retries} in {delay} seconds")
+            time.sleep(delay)
+    st.error("Failed to connect to MQTT broker after maximum retries.")
+    logging.error("Failed to connect to MQTT broker after maximum retries")
+    return False
+
 # Setup MQTT client
 client = mqtt.Client()
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
 client.on_message = on_message
-client.connect(MQTT_SERVER_IP, MQTT_PORT, 60)
-client.loop_start()
+
+# Attempt to connect
+if connect_mqtt(client):
+    client.loop_start()
 
 # Streamlit layout
 col1, col2, col3 = st.columns(3)
