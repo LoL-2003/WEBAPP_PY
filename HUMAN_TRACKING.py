@@ -306,7 +306,7 @@ import os
 # Streamlit page configuration
 st.set_page_config(page_title="Real-Time Human Tracking", layout="wide")
 st.title("📡 Real-Time Human Tracking")
-st.markdown("Live data from ChirpStack MQTT")
+st.markdown("Live_ELEMENT FROM ChirpStack MQTT")
 
 # MQTT Broker Configuration
 MQTT_SERVER_IP = "test.chirpstack.vandyam.com"
@@ -319,7 +319,6 @@ TOPIC = f"application/{APPLICATION_ID}/device/{DEVICE_EUI}/event/#"
 HEADER = bytearray([0xAA, 0xFF, 0x03, 0x00])
 FOOTER = bytearray([0x55, 0xCC])
 NUM_TARGETS = 3
-CMD_SENSOR_DATA = 0xAB
 
 # Logging setup
 log_dir = "log"
@@ -405,8 +404,9 @@ def on_message(client, userdata, msg):
             rssi = payload["rxInfo"][0].get("rssi", None)
             snr = payload["rxInfo"][0].get("snr", None)
             logging.info(f"Uplink from {device_info['deviceName']} Message: {hex(message_bytes[0])}")
+            logging.info(f"Raw message (hex): {message_bytes.hex()}")
             logging.info(f"RSSI: {rssi} SNR: {snr}")
-            if message_bytes[0] == CMD_SENSOR_DATA and len(message_bytes) == 30 and message_bytes[:4] == HEADER and message_bytes[-2:] == FOOTER:
+            if len(message_bytes) == 30 and message_bytes[:4] == HEADER and message_bytes[-2:] == FOOTER:
                 logging.info("Detected Target Frame Structure")
                 targets_found = process_target_data(message_bytes)
                 logging.info(f"Found {targets_found} valid targets")
