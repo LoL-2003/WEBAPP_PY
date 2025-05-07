@@ -142,6 +142,157 @@
 #         dist_pl.metric("Distance (cm)", f"{t_data['distance']:.2f}")
 #     time.sleep(0.5)
 
+# import streamlit as st
+# import paho.mqtt.client as mqtt
+# import json
+# import base64
+# import math
+# import time
+# import logging
+# from datetime import datetime
+# import os
+
+# # Streamlit page configuration
+# st.set_page_config(page_title="Real-Time Human Tracking", layout="wide")
+# st.title("📡 Real-Time Human Tracking")
+# st.markdown("Live data from ChirpStack MQTT")
+
+# # MQTT Broker Configuration
+# MQTT_SERVER_IP = "test.chirpstack.vandyam.com"
+# MQTT_PORT = 1883
+# APPLICATION_ID = "3ff2570b-20e9-4fbe-8519-2e0e880dc4f4"
+# DEVICE_EUI = "c750f39bf0e894c7"
+# TOPIC = f"application/{APPLICATION_ID}/device/{DEVICE_EUI}/event/#"
+
+# # Frame structure constants
+# HEADER = bytearray([0xAA, 0xFF, 0x03, 0x00])
+# FOOTER = bytearray([0x55, 0xCC])
+# NUM_TARGETS = 3
+# CMD_SENSOR_DATA = 0xAB
+
+# # Logging setup
+# log_dir = "log"
+# if not os.path.exists(log_dir):
+#     os.makedirs(log_dir)
+# log_filename = f"mylog_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+# log_filename = os.path.join(log_dir, log_filename)
+# logging.basicConfig(filename=log_filename, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.info("Streamlit MQTT target tracker started")
+
+# # Global dictionary to track all targets
+# target_data = {
+#     1: {"x": 0, "y": 0, "speed": 0, "distance": 0, "movement": "Stationary", "target_distance": 0},
+#     2: {"x": 0, "y": 0, "speed": 0, "distance": 0, "movement": "Stationary", "target_distance": 0},
+#     3: {"x": 0, "y": 0, "speed": 0, "distance": 0, "movement": "Stationary", "target_distance": 0},
+# }
+
+# # MQTT message processing
+# def process_target_data(msg):
+#     targets_found = 0
+#     for i in range(NUM_TARGETS):
+#         offset = 4 + (i * 8)  # Skip header (4 bytes)
+#         x_raw = int.from_bytes(msg[offset:offset+2], byteorder='little')
+#         y_raw = int.from_bytes(msg[offset+2:offset+4], byteorder='little')
+#         speed_raw = int.from_bytes(msg[offset+4:offset+6], byteorder='little')
+#         dist_raw = int.from_bytes(msg[offset+6:offset+8], byteorder='little')
+
+#         # Apply formulas
+#         x_coord = 0 - x_raw
+#         y_coord = y_raw - 32768
+#         speed = 0 - speed_raw
+#         distance = dist_raw
+
+#         # Calculate target distance
+#         target_distance = math.sqrt(x_coord**2 + y_coord**2) / 10
+
+#         # Handle special case for Y coordinate
+#         if y_coord == -32768:
+#             y_coord = 0
+
+#         # Determine movement
+#         movement = "Approaching" if speed < 0 else "Moving Away"
+#         if speed == 0:
+#             movement = "Stationary"
+
+#         # Update target data if valid
+#         if x_raw != 0 or y_raw != 0 or speed_raw != 0 or dist_raw != 0:
+#             targets_found += 1
+#             target_data[i+1]["x"] = x_coord / 10
+#             target_data[i+1]["y"] = y_coord / 10
+#             target_data[i+1]["speed"] = speed / 10
+#             target_data[i+1]["distance"] = distance / 10
+#             target_data[i+1]["movement"] = movement
+#             target_data[i+1]["target_distance"] = target_distance
+#             logging.info(f"Target {i+1} X Coordinate: {x_coord/10} cm")
+#             logging.info(f"Target {i+1} Y Coordinate: {y_coord/10} cm")
+#             logging.info(f"Target {i+1} Speed: {speed/10} cm/s ({movement})")
+#             logging.info(f"Target {i+1} Distance Resolution: {distance/10} cm")
+#             logging.info(f"Target {i+1} Distance: {target_distance:.2f} cm")
+
+#     return targets_found
+
+# # MQTT callbacks
+# def on_connect(client, userdata, flags, rc):
+#     st.success(f"Connected to MQTT broker with result code: {rc}")
+#     client.subscribe(TOPIC)
+#     logging.info(f"Subscribed to: {TOPIC}")
+
+# def on_message(client, userdata, msg):
+#     try:
+#         payload = json.loads(msg.payload.decode())
+#         if msg.topic.endswith("/up"):
+#             message = payload["data"]
+#             message_bytes = base64.b64decode(message)
+#             device_info = payload["deviceInfo"]
+#             rssi = payload["rxInfo"][0].get("rssi", None)
+#             snr = payload["rxInfo"][0].get("snr", None)
+#             logging.info(f"Uplink from {device_info['deviceName']} Message: {hex(message_bytes[0])}")
+#             logging.info(f"RSSI: {rssi} SNR: {snr}")
+#             if message_bytes[0] == CMD_SENSOR_DATA and len(message_bytes) == 30 and message_bytes[:4] == HEADER and message_bytes[-2:] == FOOTER:
+#                 logging.info("Detected Target Frame Structure")
+#                 targets_found = process_target_data(message_bytes)
+#                 logging.info(f"Found {targets_found} valid targets")
+#             else:
+#                 logging.info("Ignoring non-target frame")
+#     except Exception as e:
+#         st.error(f"Error processing message: {e}")
+#         logging.error(f"Error processing message: {e}")
+
+# # Setup MQTT client
+# client = mqtt.Client()
+# client.on_connect = on_connect
+# client.on_message = on_message
+# client.connect(MQTT_SERVER_IP, MQTT_PORT, 60)
+# client.loop_start()
+
+# # Streamlit layout
+# col1, col2, col3 = st.columns(3)
+# target_cols = [col1, col2, col3]
+
+# placeholders = []
+# for col, target_id in zip(target_cols, [1, 2, 3]):
+#     col.subheader(f"🎯 Target {target_id}")
+#     x = col.metric("X (cm)", "0.00")
+#     y = col.metric("Y (cm)", "0.00")
+#     speed = col.metric("Speed (cm/s)", "0.00")
+#     dist = col.metric("Distance (cm)", "0.00")
+#     movement = col.metric("Movement", "Stationary")
+#     target_dist = col.metric("Target Distance (cm)", "0.00")
+#     placeholders.append((x, y, speed, dist, movement, target_dist))
+
+# # Main loop for updating Streamlit UI
+# while True:
+#     for i, (x_pl, y_pl, speed_pl, dist_pl, movement_pl, target_dist_pl) in enumerate(placeholders):
+#         t_data = target_data[i + 1]
+#         x_pl.metric("X (cm)", f"{t_data['x']:.2f}")
+#         y_pl.metric("Y (cm)", f"{t_data['y']:.2f}")
+#         speed_pl.metric("Speed (cm/s)", f"{t_data['speed']:.2f}")
+#         dist_pl.metric("Distance (cm)", f"{t_data['distance']:.2f}")
+#         movement_pl.metric("Movement", t_data['movement'])
+#         target_dist_pl.metric("Target Distance (cm)", f"{t_data['target_distance']:.2f}")
+#     time.sleep(0.5)
+
+
 import streamlit as st
 import paho.mqtt.client as mqtt
 import json
@@ -237,6 +388,13 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(TOPIC)
     logging.info(f"Subscribed to: {TOPIC}")
 
+def on_disconnect(client, userdata, rc):
+    if rc != 0:
+        st.error(f"Disconnected from MQTT broker unexpectedly with result code: {rc}")
+    else:
+        st.warning("Disconnected from MQTT broker")
+    logging.info(f"Disconnected from MQTT broker with result code: {rc}")
+
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
@@ -261,6 +419,7 @@ def on_message(client, userdata, msg):
 # Setup MQTT client
 client = mqtt.Client()
 client.on_connect = on_connect
+client.on_disconnect = on_disconnect
 client.on_message = on_message
 client.connect(MQTT_SERVER_IP, MQTT_PORT, 60)
 client.loop_start()
